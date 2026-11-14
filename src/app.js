@@ -13,6 +13,8 @@ const MAX_FILE = 10 * 1024 * 1024;
 const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
 const SESSION_TTL = 30 * DAY;
+const BOT_WALL_MESSAGE = 'Your Moodle is behind a bot check that blocks automatic sync. '
+  + 'In Moodle use Export calendar → "Export" to download the .ics file, then import it below.';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -184,6 +186,10 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     let body;
     try {
       const res = await fetchImpl(user.ics_url, { signal: AbortSignal.timeout(15_000) });
+      const cloudflareBlock = !res.ok && /cloudflare/i.test(res.headers.get('server') || '');
+      if (res.headers.get('cf-mitigated') === 'challenge' || cloudflareBlock) {
+        throw new HttpError(502, BOT_WALL_MESSAGE);
+      }
       if (!res.ok) throw new HttpError(502, `Moodle answered with status ${res.status}`);
       body = await res.text();
     } catch (err) {

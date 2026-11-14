@@ -32,7 +32,7 @@ function toast(message, isError = false) {
   toastEl.className = isError ? 'error' : '';
   toastEl.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3500);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, Math.max(3500, message.length * 60));
 }
 
 async function api(method, path, body) {
@@ -329,11 +329,12 @@ async function showSettings() {
       const saved = await act(() => api('PUT', '/api/settings', { icsUrl: moodleForm.icsUrl.value }));
       if (!saved) return;
       me = saved;
-      if (saved.icsUrl) {
-        const r = await act(() => api('POST', '/api/sync', {}));
-        if (r) toast(`Connected — imported ${r.imported} Moodle events`);
-      } else toast('Moodle link removed');
-      render();
+      if (!saved.icsUrl) { toast('Moodle link removed'); return render(); }
+      const r = await act(() => api('POST', '/api/sync', {}));
+      if (r) { toast(`Connected — imported ${r.imported} Moodle events`); return render(); }
+      // Sync failed (e.g. a bot check in front of Moodle): offer the file import right here.
+      importBox.open = true;
+      importBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     },
   },
   h('label', {}, 'Moodle calendar link',
@@ -354,6 +355,11 @@ async function showSettings() {
   h('label', {}, '.ics file', h('input', { name: 'file', type: 'file', accept: '.ics,text/calendar' })),
   h('label', {}, '…or paste its contents', h('textarea', { name: 'ics', placeholder: 'BEGIN:VCALENDAR…' })),
   h('button', { type: 'submit' }, 'Import'));
+
+  const importBox = h('details', {},
+    h('summary', {}, 'Import an .ics file instead'),
+    h('p', { class: 'muted small spaced' }, 'In Moodle: Calendar → Import or export calendars → Export calendar → "Export". Upload the downloaded file here. Re-import it whenever you want to refresh.'),
+    pasteForm);
 
   const groupCard = me.group
     ? h('div', {},
@@ -421,8 +427,7 @@ async function showSettings() {
       moodleForm),
     h('section', { class: 'card' }, h('h2', {}, 'Your group'), groupCard),
     h('section', { class: 'card' }, h('h2', {}, 'Telegram reminders'), tgBox),
-    h('section', { class: 'card' },
-      h('details', {}, h('summary', {}, 'Import an .ics file instead'), h('p', {}, ''), pasteForm)));
+    h('section', { class: 'card' }, importBox));
 }
 
 // ---------- exam prep ----------

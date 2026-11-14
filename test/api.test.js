@@ -163,6 +163,20 @@ test('moodle: pasted feed and calendar link import without duplicates', async (t
   assert.equal((await call('POST', '/api/import-ics', { ics: 'hello' })).status, 400);
 });
 
+test('moodle: a Cloudflare bot check gives a clear message pointing to file import', async (t) => {
+  const fetchImpl = async () => new Response('<title>Just a moment...</title>', {
+    status: 403, headers: { server: 'cloudflare', 'cf-mitigated': 'challenge' },
+  });
+  const { base, close } = await start({ fetchImpl });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('PUT', '/api/settings', { icsUrl: 'https://learn.example/calendar/export_execute.php?userid=1&authtoken=x' });
+  const sync = await call('POST', '/api/sync', {});
+  assert.equal(sync.status, 502);
+  assert.match(sync.data.error, /bot check/);
+  assert.match(sync.data.error, /\.ics/);
+});
+
 test('telegram: link through /start code, reminders sent once', async (t) => {
   const { app, base, sent, close } = await start();
   t.after(close);
