@@ -177,6 +177,48 @@ test('moodle: a Cloudflare bot check gives a clear message pointing to file impo
   assert.match(sync.data.error, /\.ics/);
 });
 
+test('extension: scoped key reads the Moodle link and uploads the calendar', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const link = 'https://moodle.example/calendar/export_execute.php?userid=1&authtoken=abc';
+  await call('PUT', '/api/settings', { icsUrl: link });
+
+  const anon = client(base);
+  assert.equal((await anon('POST', '/api/extension/key', {})).status, 401);
+  const { key } = (await call('POST', '/api/extension/key', {})).data;
+  assert.match(key, /^[a-f0-9]{64}$/);
+  assert.equal((await call('GET', '/api/me')).data.extension.connected, true);
+
+  const ext = (method, path, body, k = key) => fetch(base + path, {
+    method,
+    headers: { authorization: `Bearer ${k}`, ...(body && { 'content-type': 'application/json' }) },
+    body: body && JSON.stringify(body),
+  }).then(async (r) => ({ status: r.status, data: await r.json() }));
+
+  assert.deepEqual((await ext('GET', '/api/extension/config')).data, { icsUrl: link });
+  assert.equal((await ext('GET', '/api/extension/config', undefined, 'f'.repeat(64))).status, 401);
+  // The extension key is not a login: it cannot reach the normal API.
+  assert.equal((await ext('GET', '/api/deadlines')).status, 401);
+
+  const up = await ext('POST', '/api/extension/upload', { ics: FEED });
+  assert.equal(up.status, 200);
+  assert.equal(up.data.imported, 1);
+  const items = (await call('GET', '/api/deadlines')).data.items;
+  assert.equal(items.length, 1);
+  assert.match(items[0].url, /^https:\/\/moodle\.example\/calendar\/view\.php/);
+  assert.equal((await call('GET', '/api/me')).data.lastSyncAt, NOW);
+  assert.equal((await ext('POST', '/api/extension/upload', { ics: 'nope' })).status, 400);
+
+  const { key: newKey } = (await call('POST', '/api/extension/key', {})).data;
+  assert.equal((await ext('GET', '/api/extension/config')).status, 401);
+  assert.equal((await ext('GET', '/api/extension/config', undefined, newKey)).status, 200);
+
+  await call('DELETE', '/api/extension/key');
+  assert.equal((await ext('GET', '/api/extension/config', undefined, newKey)).status, 401);
+  assert.equal((await call('GET', '/api/me')).data.extension.connected, false);
+});
+
 test('telegram: link through /start code, reminders sent once', async (t) => {
   const { app, base, sent, close } = await start();
   t.after(close);

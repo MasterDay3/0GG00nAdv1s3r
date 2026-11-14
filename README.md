@@ -20,6 +20,19 @@ Environment variables:
 | `DB_PATH` | `data/dueboard.db` | SQLite file |
 | `TELEGRAM_BOT_TOKEN` | — | Turns on the Telegram bot (account linking and reminders 3 days / 1 day ahead) |
 
+## Moodle sync through the Chrome extension
+
+UCU Moodle (`learn.ucu.edu.ua`) sits behind a Cloudflare bot check, so the server cannot download the calendar link itself.
+The `extension/` folder is a Chrome extension that downloads it from the student's browser instead:
+
+1. Paste the Moodle calendar link in Dueboard → Settings.
+2. Open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and pick the `extension/` folder.
+3. Reload Dueboard → Settings → **Connect extension**.
+
+It then syncs every hour and every time a Moodle page is opened. It authenticates with its own key, which can only read
+the calendar link and upload the calendar. The extension is set up for `learn.ucu.edu.ua` and a Dueboard running on
+`localhost`/`127.0.0.1`; change `host_permissions` and `matches` in `extension/manifest.json` for other hosts.
+
 ## Features
 
 - **Deadline board.** Connect Moodle with its read-only calendar link (Calendar → Export → Get calendar URL), or import an `.ics` file. One list colour-coded by urgency: red under 48 h, amber under 7 days, grey later. Re-syncs every 6 hours.

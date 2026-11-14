@@ -1,5 +1,5 @@
 // node:crypto is needed for password hashing and session tokens; node:fs to serve the page files.
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parseIcs } from './ics.js';
 import { urgency, DAY } from './urgency.js';
@@ -40,7 +40,9 @@ async function verifyPassword(password, stored) {
   return timingSafeEqual(Buffer.from(candidate.split(':')[1], 'hex'), Buffer.from(keyHex, 'hex'));
 }
 
-const DUMMY_HASH = `${'0'.repeat(32)}:${'0'.repeat(128)}`;
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+
+const DUMMY_HASH =`${'0'.repeat(32)}:${'0'.repeat(128)}`;
 
 function parseCookies(header = '') {
   const cookies = {};
@@ -104,6 +106,13 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     ) || null;
   }
 
+  // The browser extension authenticates with its own key, which only opens the /api/extension/* routes.
+  function extensionUser(req) {
+    const match = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '');
+    if (!match) return null;
+    return one('SELECT * FROM users WHERE ext_key_hash = ?', sha256(match[1])) || null;
+  }
+
   function startSession(res, userId) {
     const token = randomBytes(32).toString('hex');
     run('DELETE FROM sessions WHERE expires_at <= ?', now());
@@ -119,6 +128,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       icsUrl: user.ics_url || '',
       lastSyncAt: user.last_sync_at,
       telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id) },
+      extension: { connected: Boolean(user.ext_key_hash) },
     };
   }
 
@@ -370,6 +380,30 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     return { imported: importEvents(user, parseIcs(ics), null) };
   }, { limit: MAX_FEED + 4096 });
 
+  // ---------- routes: browser extension ----------
+
+  route('POST', '/api/extension/key', ({ user }) => {
+    const key = randomBytes(32).toString('hex');
+    run('UPDATE users SET ext_key_hash = ? WHERE id = ?', sha256(key), user.id);
+    return { key };
+  });
+
+  route('DELETE', '/api/extension/key', ({ user }) => {
+    run('UPDATE users SET ext_key_hash = NULL WHERE id = ?', user.id);
+    return { ok: true };
+  });
+
+  route('GET', '/api/extension/config', ({ user }) => ({ icsUrl: user.ics_url || '' }), { auth: 'extension' });
+
+  route('POST', '/api/extension/upload', ({ user, body }) => {
+    const ics = text(body.ics, 'Calendar', { max: MAX_FEED });
+    if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'That is not an .ics calendar');
+    const origin = user.ics_url ? new URL(user.ics_url).origin : null;
+    const imported = importEvents(user, parseIcs(ics), origin);
+    run('UPDATE users SET last_sync_at = ? WHERE id = ?', now(), user.id);
+    return { imported };
+  }, { auth: 'extension', limit: MAX_FEED + 4096 });
+
   // ---------- routes: telegram ----------
 
   route('POST', '/api/telegram/link', async ({ user }) => {
@@ -543,8 +577,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       const params = Object.fromEntries(
         Object.entries(match.re.exec(pathname).groups || {}).map(([k, v]) => [k, Number(v)]),
       );
-      const user = currentUser(req);
-      if (match.auth && !user) throw new HttpError(401, 'Please log in');
+      const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
+      if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Extension is not connected' : 'Please log in');
       const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req, match.limit) : {};
       const result = await match.fn({ req, res, user, params, body });
       if (!res.headersSent) sendJson(res, 200, result);
@@ -592,7 +626,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   }
 
   async function syncAll() {
-    for (const user of all('SELECT * FROM users WHERE ics_url IS NOT NULL')) {
+    // Users with the extension connected are synced from their browser instead.
+    for (const user of all('SELECT * FROM users WHERE ics_url IS NOT NULL AND ext_key_hash IS NULL')) {
       try {
         await syncMoodle(user);
       } catch (err) {

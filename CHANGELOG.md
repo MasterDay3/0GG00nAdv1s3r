@@ -20,4 +20,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Personal notes on any deadline.
 - `api`: Telegram bot linking and reminders 3 days and 1 day before each deadline (needs `TELEGRAM_BOT_TOKEN`).
 - `ui`: Exam prep: exams on the board, topics, hand-written quiz questions and practice problems, slide uploads.
+- `api`: Clear message when Moodle is behind a bot check, pointing to the alternatives.
+- `infra`: Dueboard Sync Chrome extension that syncs the Moodle calendar from the browser every hour and on every Moodle visit.
+- `auth`: Separate extension key that can only read the calendar link and upload the calendar.
 - `core`: Diagnostic test scoring (strong ≥ 70 % / weak per topic) and a day-by-day study plan counted back from the exam date.

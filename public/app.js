@@ -296,7 +296,7 @@ async function showBoard() {
           type: 'button', class: 'secondary shrink',
           onclick: async (e) => {
             e.target.disabled = true;
-            const r = await act(() => api('POST', '/api/sync', {}));
+            const r = await act(syncMoodle);
             e.target.disabled = false;
             if (r) { toast(`Synced ${r.imported} Moodle events`); render(); }
           },
@@ -318,6 +318,88 @@ function sessionStorageSet(key, value) {
   try { sessionStorage.setItem(key, value); } catch { /* storage unavailable */ }
 }
 
+// ---------- browser extension ----------
+
+// The Dueboard Sync extension marks the page when installed and answers window messages.
+const extensionInstalled = () => Boolean(document.documentElement.dataset.dueboardExtension);
+
+let extensionCallId = 0;
+function extensionCall(type, extra = {}) {
+  return new Promise((resolve, reject) => {
+    const id = ++extensionCallId;
+    const done = () => { clearTimeout(timer); window.removeEventListener('message', onMessage); };
+    const timer = setTimeout(() => {
+      done();
+      reject(new Error('The Dueboard Sync extension did not answer. Reload this page and try again.'));
+    }, 30_000);
+    function onMessage(event) {
+      if (event.source !== window || event.data?.source !== 'dueboard-extension' || event.data.id !== id) return;
+      done();
+      const result = event.data.result;
+      if (!result) reject(new Error('The extension did not answer. Reload the extension and this page.'));
+      else if (result.ok) resolve(result);
+      else reject(new Error(result.error));
+    }
+    window.addEventListener('message', onMessage);
+    window.postMessage({ source: 'dueboard-page', type, id, ...extra }, location.origin);
+  });
+}
+
+// Sync through the extension when it is connected (needed for Moodles behind a bot check), else via the server.
+function syncMoodle() {
+  if (me.extension.connected && extensionInstalled()) return extensionCall('sync');
+  return api('POST', '/api/sync', {});
+}
+
+function extensionCard() {
+  const steps = h('ol', { class: 'small' },
+    h('li', {}, 'Open ', h('span', { class: 'code' }, 'chrome://extensions'), ' and turn on Developer mode (top right).'),
+    h('li', {}, 'Click "Load unpacked" and pick the ', h('span', { class: 'code' }, 'extension'), ' folder of this project.'),
+    h('li', {}, 'Reload this page and press "Connect extension".'));
+  const intro = h('p', { class: 'muted small' },
+    'UCU Moodle blocks servers with a bot check, so Dueboard cannot download your calendar by itself. '
+    + 'The Dueboard Sync extension downloads it from your browser every hour and whenever you open Moodle.');
+
+  if (!extensionInstalled()) {
+    return [intro, steps, me.extension.connected
+      ? h('p', { class: 'small' }, 'Connected in another browser. Install it here too to sync from this one.')
+      : null];
+  }
+  if (!me.extension.connected) {
+    return [intro, h('button', {
+      type: 'button',
+      onclick: async (e) => {
+        e.target.disabled = true;
+        const { key } = (await act(() => api('POST', '/api/extension/key', {}))) || {};
+        if (key) {
+          const r = await act(() => extensionCall('connect', { key }));
+          toast(r ? `Extension connected — synced ${r.imported} Moodle events` : 'Extension connected. It will sync once you open Moodle.');
+        }
+        render();
+      },
+    }, 'Connect extension')];
+  }
+  return [
+    h('p', {}, '✅ Connected. Your deadlines refresh every hour and whenever you open Moodle.'),
+    h('div', { class: 'row' },
+      h('button', {
+        type: 'button', class: 'shrink',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          const r = await act(() => extensionCall('sync'));
+          if (r) toast(`Synced ${r.imported} Moodle events`);
+          render();
+        },
+      }, 'Sync now'),
+      h('button', {
+        type: 'button', class: 'secondary shrink',
+        onclick: async () => {
+          if (await act(() => api('DELETE', '/api/extension/key'), 'Extension disconnected')) render();
+        },
+      }, 'Disconnect')),
+  ];
+}
+
 // ---------- settings ----------
 
 async function showSettings() {
@@ -330,17 +412,16 @@ async function showSettings() {
       if (!saved) return;
       me = saved;
       if (!saved.icsUrl) { toast('Moodle link removed'); return render(); }
-      const r = await act(() => api('POST', '/api/sync', {}));
-      if (r) { toast(`Connected — imported ${r.imported} Moodle events`); return render(); }
-      // Sync failed (e.g. a bot check in front of Moodle): offer the file import right here.
-      importBox.open = true;
-      importBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const r = await act(syncMoodle);
+      if (r) { toast(`Saved — synced ${r.imported} Moodle events`); return render(); }
+      // Sync failed (e.g. a bot check in front of Moodle): point to the extension.
+      extensionSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
     },
   },
   h('label', {}, 'Moodle calendar link',
     h('input', { name: 'icsUrl', type: 'text', value: me.icsUrl, placeholder: 'https://moodle.ucu.edu.ua/calendar/export_execute.php?…' })),
   h('div', { class: 'row' },
-    h('span', { class: 'muted small' }, me.lastSyncAt ? `Last synced ${fmtDate(me.lastSyncAt)}. Re-syncs every 6 hours.` : 'Not synced yet.'),
+    h('span', { class: 'muted small' }, me.lastSyncAt ? `Last synced ${fmtDate(me.lastSyncAt)}.` : 'Not synced yet.'),
     h('button', { type: 'submit', class: 'shrink' }, 'Save & sync')));
 
   const pasteForm = h('form', {
@@ -388,6 +469,8 @@ async function showSettings() {
         },
       }, h('label', {}, '…or create one', h('input', { name: 'name', required: true, maxlength: 80, placeholder: 'e.g. CS-2, 2nd year' })), h('button', { type: 'submit', class: 'shrink secondary' }, 'Create')));
 
+  const extensionSection = h('section', { class: 'card' }, h('h2', {}, 'Automatic sync (Chrome extension)'), extensionCard());
+
   const tgBox = h('div', {});
   const renderTelegram = () => {
     if (!me.telegram.enabled) {
@@ -425,6 +508,7 @@ async function showSettings() {
       h('h2', {}, 'Connect Moodle'),
       h('p', { class: 'muted small' }, 'In Moodle open Calendar → Import or export calendars → Export calendar, choose "All events" and "Recent and next 60 days", then "Get calendar URL". It is a read-only link: no password, no full-access token.'),
       moodleForm),
+    extensionSection,
     h('section', { class: 'card' }, h('h2', {}, 'Your group'), groupCard),
     h('section', { class: 'card' }, h('h2', {}, 'Telegram reminders'), tgBox),
     h('section', { class: 'card' }, importBox));

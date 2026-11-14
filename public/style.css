@@ -143,6 +143,7 @@ details > summary { cursor: pointer; color: var(--accent); font-size: .85rem; }
 .auth form > * { margin-bottom: .75rem; }
 .tagline { color: var(--muted); margin-bottom: 1.25rem; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; letter-spacing: .05em; }
+span.code { font-size: .9em; letter-spacing: 0; }
 
 #toast {
   position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%);

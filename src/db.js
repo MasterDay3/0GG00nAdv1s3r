@@ -91,5 +91,9 @@ export function openDb(path = ':memory:') {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  // Columns added after the first release.
+  const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userColumns.includes('ext_key_hash')) db.exec('ALTER TABLE users ADD COLUMN ext_key_hash TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   return db;
 }

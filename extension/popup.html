@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dueboard Sync</title>
+  <style>
+    body { width: 280px; margin: 0; padding: 14px; font: 14px/1.45 system-ui, sans-serif; color: #1b1f24; background: #fff; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    p { margin: 0 0 10px; }
+    .muted { color: #5d6673; font-size: 12px; }
+    .bad { color: #c62f2f; }
+    button { font: inherit; font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid #1f5f6b; background: #1f5f6b; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; }
+    a { color: #1f5f6b; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1b1e24; color: #e7e9ec; }
+      .muted { color: #9aa3ae; }
+      .bad { color: #ff7676; }
+      a { color: #5fb3c1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Dueboard Sync</h1>
+  <p id="status">Loading…</p>
+  <p class="muted" id="details"></p>
+  <button type="button" id="sync">Sync now</button>
+  <script src="popup.js"></script>
+</body>
+</html>
