@@ -1,0 +1,95 @@
+// node:sqlite is built into Node; needed for persistent storage.
+import { DatabaseSync } from 'node:sqlite';
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS study_groups (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  join_code TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  pass_hash TEXT NOT NULL,
+  group_id INTEGER REFERENCES study_groups(id) ON DELETE SET NULL,
+  ics_url TEXT,
+  last_sync_at INTEGER,
+  tg_chat_id TEXT,
+  tg_link_code TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deadlines (
+  id INTEGER PRIMARY KEY,
+  owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  group_id INTEGER REFERENCES study_groups(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  source TEXT NOT NULL CHECK (source IN ('moodle', 'personal', 'group')),
+  uid TEXT,
+  course TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  url TEXT NOT NULL DEFAULT '',
+  due_at INTEGER NOT NULL,
+  UNIQUE (owner_user_id, uid)
+);
+CREATE TABLE IF NOT EXISTS notes (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS reminders_sent (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_key, kind)
+);
+CREATE TABLE IF NOT EXISTS exams (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  course TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  exam_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS topics (
+  id INTEGER PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS questions (
+  id INTEGER PRIMARY KEY,
+  topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+  prompt TEXT NOT NULL,
+  options TEXT NOT NULL,
+  answer_index INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS problems (
+  id INTEGER PRIMARY KEY,
+  topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+  text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS materials (
+  id INTEGER PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attempts (
+  id INTEGER PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES exams(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  result TEXT NOT NULL
+);
+`;
+
+export function openDb(path = ':memory:') {
+  const db = new DatabaseSync(path);
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
+  db.exec(SCHEMA);
+  return db;
+}

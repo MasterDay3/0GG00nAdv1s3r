@@ -1,0 +1,14 @@
+{
+  "name": "dueboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Every course deadline in one list, and a study coach for the week before the exam.",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test"
+  }
+}
