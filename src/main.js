@@ -12,7 +12,7 @@ const MINUTE = 60_000;
 if (DB_PATH !== ':memory:') mkdirSync(DB_PATH.replace(/[^/]*$/, '') || '.', { recursive: true });
 
 const telegram = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
-const app = createApp({ db: openDb(DB_PATH), telegram });
+const app = createApp({ db: openDb(DB_PATH), telegram, secureCookies: process.env.COOKIE_SECURE === '1' });
 
 createServer(app.handler).listen(PORT, HOST, () => {
   console.log(`Dueboard running at http://${HOST}:${PORT}`);

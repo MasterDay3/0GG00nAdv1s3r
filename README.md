@@ -19,6 +19,24 @@ Environment variables:
 | `HOST` | `127.0.0.1` | Bind address |
 | `DB_PATH` | `data/dueboard.db` | SQLite file |
 | `TELEGRAM_BOT_TOKEN` | — | Turns on the Telegram bot (account linking and reminders 3 days / 1 day ahead) |
+| `COOKIE_SECURE` | `0` | `1` adds `Secure` to the session cookie; set it when the site is served over HTTPS |
+
+## Deploy (AWS Lightsail)
+
+Live at **https://dueboard.xyz**.
+
+Production runs on one AWS Lightsail instance (`nano_3_0`, Ubuntu 24.04, eu-central-1): Node.js as a systemd service
+behind Caddy, which gets and renews the HTTPS certificate. The SQLite file lives in `/var/lib/dueboard`, and Lightsail
+takes a daily snapshot of the disk.
+
+```sh
+# on the server, first install or any update
+curl -fsSL https://raw.githubusercontent.com/MasterDay3/0GG00nAdv1s3r/main/deploy/setup.sh -o setup.sh
+sudo bash setup.sh                                  # no domain yet: HTTP on the server's IP
+sudo SITE_ADDRESS="dueboard.xyz, www.dueboard.xyz" bash setup.sh   # with the domain: HTTPS
+```
+
+Settings live in `/etc/dueboard.env` (kept between runs). Logs: `journalctl -u dueboard -f`.
 
 ## Moodle sync through the Chrome extension
 
@@ -31,7 +49,7 @@ The `extension/` folder is a Chrome extension that downloads it from the student
 
 It then syncs every hour and every time a Moodle page is opened. It authenticates with its own key, which can only read
 the calendar link and upload the calendar. The extension is set up for `learn.ucu.edu.ua` and a Dueboard running on
-`localhost`/`127.0.0.1`; change `host_permissions` and `matches` in `extension/manifest.json` for other hosts.
+`https://dueboard.xyz` or `localhost`/`127.0.0.1`; for other hosts change `host_permissions` and `matches` in `extension/manifest.json` and `DUEBOARD_ORIGIN` in `extension/background.js`.
 
 ## Features
 
