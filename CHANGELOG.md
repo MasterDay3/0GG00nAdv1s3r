@@ -24,3 +24,6 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `infra`: Dueboard Sync Chrome extension that syncs the Moodle calendar from the browser every hour and on every Moodle visit.
 - `auth`: Separate extension key that can only read the calendar link and upload the calendar.
 - `core`: Diagnostic test scoring (strong ≥ 70 % / weak per topic) and a day-by-day study plan counted back from the exam date.
+- `infra`: Deploy to AWS Lightsail: `deploy/setup.sh` installs Node.js, Caddy (automatic HTTPS) and a systemd service.
+- `auth`: `COOKIE_SECURE=1` marks the session cookie `Secure` when served over HTTPS.
+- `infra`: Dueboard Sync extension also works with the production site https://dueboard.xyz.
