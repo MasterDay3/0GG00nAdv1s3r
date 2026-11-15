@@ -66,13 +66,16 @@ elif grep -q '^# site: ' /etc/caddy/Caddyfile 2>/dev/null; then
 else
   SITE=":80"
 fi
-cat > /etc/caddy/Caddyfile <<CADDY
-# site: $SITE
-$SITE {
-	encode gzip
-	reverse_proxy 127.0.0.1:3000
-}
-CADDY
+# The first address serves the app; any others (e.g. www.) redirect to it, so there is one login cookie.
+PRIMARY="$(echo "$SITE" | cut -d, -f1 | xargs)"
+{
+  echo "# site: $SITE"
+  printf '%s {\n\tencode gzip\n\treverse_proxy 127.0.0.1:3000\n}\n' "$PRIMARY"
+  for alias in $(echo "$SITE" | cut -s -d, -f2- | tr ',' ' '); do
+    printf '%s {\n\tredir https://%s{uri} permanent\n}\n' "$alias" "$PRIMARY"
+  done
+} > /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
 install -m 644 "$APP_DIR/deploy/dueboard.service" /etc/systemd/system/dueboard.service
 systemctl daemon-reload

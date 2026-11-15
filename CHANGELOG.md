@@ -26,3 +26,4 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `core`: Diagnostic test scoring (strong ≥ 70 % / weak per topic) and a day-by-day study plan counted back from the exam date.
 - `infra`: Deploy to AWS Lightsail: `deploy/setup.sh` installs Node.js, Caddy (automatic HTTPS) and a systemd service.
 - `auth`: `COOKIE_SECURE=1` marks the session cookie `Secure` when served over HTTPS.
+- `infra`: Dueboard Sync extension also works with the production site https://dueboard.xyz.

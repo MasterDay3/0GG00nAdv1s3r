@@ -3,7 +3,7 @@
 
 const SYNC_EVERY_MINUTES = 60;
 const MOODLE_VISIT_MIN_GAP_MS = 10 * 60 * 1000;
-const DUEBOARD_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const DUEBOARD_ORIGIN = /^(https:\/\/(www\.)?dueboard\.xyz|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/;
 const KEY = /^[a-f0-9]{64}$/;
 
 function scheduleSync() {

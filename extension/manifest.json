@@ -1,18 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Dueboard Sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keeps your Dueboard deadlines in sync with your Moodle calendar.",
   "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://learn.ucu.edu.ua/*",
+    "https://dueboard.xyz/*",
+    "https://www.dueboard.xyz/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "matches": ["https://dueboard.xyz/*", "https://www.dueboard.xyz/*", "http://localhost/*", "http://127.0.0.1/*"],
       "js": ["dueboard-page.js"],
       "run_at": "document_start"
     },
