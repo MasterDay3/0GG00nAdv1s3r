@@ -85,7 +85,9 @@ function normalizeFeedUrl(value) {
   return link(url, 'Calendar link');
 }
 
-export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram }) {
+export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false }) {
+  // Behind HTTPS the session cookie must never travel over plain HTTP.
+  const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
   const routes = [];
   const route = (method, pattern, fn, { auth = true, limit = MAX_JSON } = {}) => {
     const re = new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>\\d+)')}$`);
@@ -117,7 +119,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const token = randomBytes(32).toString('hex');
     run('DELETE FROM sessions WHERE expires_at <= ?', now());
     run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', token, userId, now() + SESSION_TTL);
-    res.setHeader('set-cookie', `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL / 1000}`);
+    res.setHeader('set-cookie', `sid=${token}; ${cookieFlags}; Max-Age=${SESSION_TTL / 1000}`);
   }
 
   function me(user) {
@@ -293,7 +295,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('POST', '/api/logout', ({ req, res }) => {
     const token = parseCookies(req.headers.cookie).sid;
     if (token) run('DELETE FROM sessions WHERE token = ?', token);
-    res.setHeader('set-cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+    res.setHeader('set-cookie', `sid=; ${cookieFlags}; Max-Age=0`);
     return { ok: true };
   }, { auth: false });
 
