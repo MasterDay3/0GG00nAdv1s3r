@@ -27,3 +27,11 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `infra`: Deploy to AWS Lightsail: `deploy/setup.sh` installs Node.js, Caddy (automatic HTTPS) and a systemd service.
 - `auth`: `COOKIE_SECURE=1` marks the session cookie `Secure` when served over HTTPS.
 - `infra`: Dueboard Sync extension also works with the production site https://dueboard.xyz.
+- `api`: Telegram bot commands `/deadlines`, `/digest`, `/help`, `/stop`, shown in the bot's command menu.
+- `api`: Morning Telegram digest at 08:00 Kyiv time with deadlines due in the next 7 days (can be turned off with `/digest`).
+- `api`: Telegram message to group members when someone adds a group deadline.
+
+### Fixed
+- `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).
+- `api`: A chat that blocked the bot is unlinked instead of failing every minute.
+- `api`: The bot ignores group chats, so personal deadlines are never posted to a group.

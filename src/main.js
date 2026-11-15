@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { createApp } from './app.js';
 import { openDb } from './db.js';
 import { createTelegram } from './telegram.js';
+import { COMMANDS } from './bot.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -21,6 +22,7 @@ createServer(app.handler).listen(PORT, HOST, () => {
 
 const safely = (job) => () => job().catch((err) => console.error(err));
 setInterval(safely(app.runReminders), MINUTE);
+setInterval(safely(app.runDigests), MINUTE);
 setInterval(safely(app.syncAll), 6 * 60 * MINUTE);
 
 async function pollTelegram() {
@@ -37,4 +39,7 @@ async function pollTelegram() {
     }
   }
 }
-if (telegram.enabled) pollTelegram();
+if (telegram.enabled) {
+  telegram.setCommands(COMMANDS).catch((err) => console.error('Telegram setMyCommands failed:', err.message));
+  pollTelegram();
+}

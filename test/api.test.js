@@ -239,6 +239,127 @@ test('telegram: link through /start code, reminders sent once', async (t) => {
   assert.match(sent[0].text, /3 days/);
 });
 
+async function linkTelegram(app, call, chatId) {
+  const { code } = (await call('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: chatId, type: 'private' }, text: `/start ${code}` } });
+}
+
+const tg = (app, chatId, text, type = 'private') => app.handleTelegramUpdate({ message: { chat: { id: chatId, type }, text } });
+
+test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('POST', '/api/deadlines', { title: 'Essay', course: 'Ethics', dueAt: NOW + 2 * DAY, url: 'https://learn.example/a/1' });
+  await call('POST', '/api/deadlines', { title: 'Old lab', dueAt: NOW - DAY });
+
+  await tg(app, 7, '/deadlines');
+  assert.match(sent.at(-1).text, /not linked/);
+
+  await linkTelegram(app, call, 7);
+  assert.match(sent.at(-1).text, /Linked to Dueboard as mykola/);
+
+  await tg(app, 7, '/deadlines@dueboard_test_bot');
+  const list = sent.at(-1).text;
+  assert.match(list, /🟡 \[Ethics\] Essay/);
+  assert.match(list, /Mon 16 Nov, 14:00/, 'shown in Kyiv time (UTC+2)');
+  assert.match(list, /learn\.example\/a\/1/);
+  assert.doesNotMatch(list, /Old lab/);
+
+  await tg(app, 7, '/digest');
+  assert.match(sent.at(-1).text, /digest is off/);
+  assert.equal((await call('GET', '/api/me')).data.telegram.digest, false);
+  await tg(app, 7, '/digest');
+  assert.match(sent.at(-1).text, /digest is on/);
+
+  await tg(app, 7, 'hello');
+  assert.match(sent.at(-1).text, /\/deadlines/);
+
+  const before = sent.length;
+  await tg(app, -100500, '/deadlines', 'group');
+  assert.equal(sent.length, before, 'silent in group chats');
+
+  await tg(app, 7, '/start deadbeef0000');
+  assert.match(sent.at(-1).text, /expired/);
+
+  await tg(app, 7, '/stop');
+  assert.match(sent.at(-1).text, /Unlinked/);
+  assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
+});
+
+test('telegram: group deadline is announced to the other linked members', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const maryan = await signedUp(base, 'maryan');
+  const sviat = await signedUp(base, 'sviat');
+  const { code } = (await mykola('POST', '/api/group', { name: 'CS-2' })).data;
+  await maryan('POST', '/api/group/join', { code });
+  await sviat('POST', '/api/group/join', { code });
+  await linkTelegram(app, mykola, 1);
+  await linkTelegram(app, maryan, 2);
+
+  sent.length = 0;
+  await mykola('POST', '/api/deadlines', { title: 'Team report', course: 'OOAD', dueAt: NOW + 5 * DAY, shared: true });
+  await mykola('POST', '/api/deadlines', { title: 'My own thing', dueAt: NOW + 5 * DAY });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent.map((m) => m.chatId), ['2'], 'only linked members, not the author, only shared deadlines');
+  assert.match(sent[0].text, /mykola added a deadline for your group/);
+  assert.match(sent[0].text, /Team report/);
+});
+
+test('telegram: morning digest once a day in the 08:00 Kyiv window, only when something is due', async (t) => {
+  let clock = Date.UTC(2026, 10, 14, 5, 30); // 07:30 Kyiv
+  const { app, base, sent, close } = await start({ now: () => clock });
+  t.after(close);
+  const busy = await signedUp(base, 'busy');
+  const idle = await signedUp(base, 'idle');
+  await busy('POST', '/api/deadlines', { title: 'Essay', dueAt: clock + 3 * DAY });
+  await busy('POST', '/api/deadlines', { title: 'Far away', dueAt: clock + 20 * DAY });
+  await linkTelegram(app, busy, 1);
+  await linkTelegram(app, idle, 2);
+  sent.length = 0;
+
+  await app.runDigests();
+  assert.equal(sent.length, 0, 'too early');
+
+  clock = Date.UTC(2026, 10, 14, 6, 5); // 08:05 Kyiv
+  await app.runDigests();
+  await app.runDigests();
+  assert.deepEqual(sent.map((m) => m.chatId), ['1']);
+  assert.match(sent[0].text, /Essay/);
+  assert.doesNotMatch(sent[0].text, /Far away/);
+
+  clock += DAY; // next morning, digest switched off
+  await tg(app, 1, '/digest');
+  sent.length = 0;
+  await app.runDigests();
+  assert.equal(sent.length, 0);
+});
+
+test('telegram: a chat that blocked the bot gets unlinked', async (t) => {
+  const sent = [];
+  let blocked = false;
+  const telegram = {
+    enabled: true,
+    botName: async () => 'dueboard_test_bot',
+    send: async (chatId, text) => {
+      if (blocked) throw Object.assign(new Error('Forbidden: bot was blocked by the user'), { code: 403 });
+      sent.push({ chatId, text });
+    },
+  };
+  const { app, base, close } = await start({ telegram });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 12 * HOUR });
+  await linkTelegram(app, call, 9);
+
+  blocked = true;
+  t.mock.method(console, 'error', () => {});
+  await app.runReminders();
+  assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
+});
+
 test('prep: exam on the board, diagnostic test, weak topics and plan, owner-only access', async (t) => {
   const { base, close } = await start();
   t.after(close);

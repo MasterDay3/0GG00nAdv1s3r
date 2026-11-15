@@ -477,7 +477,8 @@ async function showSettings() {
       tgBox.replaceChildren(h('p', { class: 'muted' }, 'The Telegram bot is off on this server. Start it with TELEGRAM_BOT_TOKEN set to turn on reminders.'));
     } else if (me.telegram.linked) {
       tgBox.replaceChildren(
-        h('p', {}, '✅ Linked. Reminders arrive 3 days and 1 day before each deadline.'),
+        h('p', {}, '✅ Linked. Reminders arrive 3 days and 1 day before each deadline, plus a morning digest when something is due that week.'),
+        h('p', { class: 'muted' }, 'In the bot: /deadlines lists what is due, /digest turns the digest on or off, /stop unlinks.'),
         h('button', {
           type: 'button', class: 'secondary',
           onclick: async () => { if (await act(() => api('DELETE', '/api/telegram'), 'Telegram unlinked')) render(); },
