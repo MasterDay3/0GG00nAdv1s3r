@@ -4,6 +4,7 @@ import { urgency, HOUR, DAY } from '../src/urgency.js';
 import { dueReminders } from '../src/reminders.js';
 import { buildPlan, addDays, daysBetween } from '../src/plan.js';
 import { scoreDiagnostic } from '../src/diagnostic.js';
+import { formatDue, localParts, digestText } from '../src/bot.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 
@@ -93,4 +94,20 @@ test('diagnostic: 70% or more is strong, unanswered counts as wrong, no question
     { topicId: 2, name: 'Series', correct: 1, total: 2, status: 'weak' },
     { topicId: 3, name: 'Integrals', correct: 0, total: 0, status: 'untested' },
   ]);
+});
+
+test('bot: Kyiv time, including the summer/winter clock change', () => {
+  assert.equal(formatDue(Date.UTC(2026, 10, 16, 21, 59)), 'Mon 16 Nov, 23:59');
+  assert.equal(formatDue(Date.UTC(2026, 6, 1, 20, 59)), 'Wed 1 Jul, 23:59');
+  assert.deepEqual(localParts(Date.UTC(2026, 10, 14, 22, 30)), { date: '2026-11-15', hour: 0 });
+});
+
+test('bot: digest covers only the next 7 days', () => {
+  const items = [
+    { key: 'd1', title: 'Soon', course: '', url: '', dueAt: NOW + DAY },
+    { key: 'd2', title: 'Later', course: '', url: '', dueAt: NOW + 8 * DAY },
+  ];
+  assert.match(digestText(items, NOW), /Soon/);
+  assert.doesNotMatch(digestText(items, NOW), /Later/);
+  assert.equal(digestText([items[1]], NOW), null);
 });

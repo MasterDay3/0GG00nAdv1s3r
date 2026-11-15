@@ -56,5 +56,5 @@ the calendar link and upload the calendar. The extension is set up for `learn.uc
 - **Deadline board.** Connect Moodle with its read-only calendar link (Calendar → Export → Get calendar URL), or import an `.ics` file. One list colour-coded by urgency: red under 48 h, amber under 7 days, grey later. Re-syncs every 6 hours.
 - **Own and group deadlines.** Add a deadline Moodle does not know about, for yourself or your whole group (join with a code).
 - **Personal notes** on any deadline.
-- **Telegram reminders** 3 days and 1 day before each deadline.
+- **Telegram bot** (needs `TELEGRAM_BOT_TOKEN`). Link from Settings → Connect Telegram. Reminders 3 days and 1 day before each deadline, a morning digest at 08:00 Kyiv time when something is due within 7 days, and a message when a groupmate adds a group deadline. Commands: `/deadlines`, `/digest` (on/off), `/help`, `/stop`. It only answers in private chats, and a chat that blocks the bot is unlinked automatically.
 - **Exam prep.** Add an exam (it appears on the board), its topics, quiz questions and practice problems, and upload lecture slides. A diagnostic test marks each topic strong (≥ 70 %) or weak, shows practice problems for weak topics, and builds a day-by-day plan counted back from the exam date.
