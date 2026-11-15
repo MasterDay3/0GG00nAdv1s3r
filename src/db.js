@@ -94,6 +94,9 @@ export function openDb(path = ':memory:') {
   // Columns added after the first release.
   const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!userColumns.includes('ext_key_hash')) db.exec('ALTER TABLE users ADD COLUMN ext_key_hash TEXT');
+  if (!userColumns.includes('tg_digest')) db.exec('ALTER TABLE users ADD COLUMN tg_digest INTEGER NOT NULL DEFAULT 1');
+  // Kyiv date ('YYYY-MM-DD') of the last morning digest, so it goes out once a day.
+  if (!userColumns.includes('tg_digest_on')) db.exec('ALTER TABLE users ADD COLUMN tg_digest_on TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   return db;
 }

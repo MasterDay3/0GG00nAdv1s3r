@@ -7,6 +7,9 @@ import { dueReminders, reminderText } from './reminders.js';
 import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
+import {
+  NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
+} from './bot.js';
 
 const MAX_JSON = 64 * 1024;
 const MAX_FILE = 10 * 1024 * 1024;
@@ -129,7 +132,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       group: group ? { name: group.name, code: group.join_code } : null,
       icsUrl: user.ics_url || '',
       lastSyncAt: user.last_sync_at,
-      telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id) },
+      telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id), digest: Boolean(user.tg_digest) },
       extension: { connected: Boolean(user.ext_key_hash) },
     };
   }
@@ -347,6 +350,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       course, title, url, dueAt,
     );
     const id = Number(lastInsertRowid);
+    // Not awaited: the response should not wait for Telegram.
+    if (shared) notifyGroup(user, { source: 'group', course, title, url, dueAt }).catch((err) => console.error(err));
     return { id, key: `d${id}` };
   });
 
@@ -594,18 +599,63 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   // ---------- background jobs ----------
 
+  // Sends to a linked chat; a chat that blocked the bot (403) is unlinked so we stop writing to it.
+  async function sendTo(user, message) {
+    try {
+      await telegram.send(user.tg_chat_id, message);
+      return true;
+    } catch (err) {
+      if (err.code === 403) run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
+      console.error(`Telegram message to ${user.username} failed:`, err.message);
+      return false;
+    }
+  }
+
+  async function notifyGroup(author, item) {
+    if (!telegram.enabled) return;
+    const members = all(
+      'SELECT * FROM users WHERE group_id = ? AND id != ? AND tg_chat_id IS NOT NULL', author.group_id, author.id,
+    );
+    const message = groupDeadlineText(author.username, item, now());
+    for (const member of members) await sendTo(member, message);
+  }
+
   async function handleTelegramUpdate(update) {
     const message = update.message;
     if (!message?.chat || typeof message.text !== 'string') return;
+    // Deadlines are personal: only answer in a private chat with the bot, never in group chats.
+    if (message.chat.type && message.chat.type !== 'private') return;
     const chatId = String(message.chat.id);
-    const match = /^\/start(?:@\w+)?\s+([a-f0-9]{12})$/.exec(message.text.trim());
-    const user = match && one('SELECT * FROM users WHERE tg_link_code = ?', match[1]);
-    if (!user) {
-      await telegram.send(chatId, 'Hi! Open Dueboard → Settings → "Connect Telegram" to link your account.');
-      return;
+    const reply = (text) => telegram.send(chatId, text);
+    const [word = '', arg = ''] = message.text.trim().split(/\s+/);
+    const command = word.toLowerCase().replace(/@\w+$/, '');
+    const user = one('SELECT * FROM users WHERE tg_chat_id = ?', chatId);
+
+    if (command === '/start' && arg) {
+      const target = /^[a-f0-9]{12}$/.test(arg) && one('SELECT * FROM users WHERE tg_link_code = ?', arg);
+      if (!target) return reply('That link has expired. Open Dueboard → Settings → "Connect Telegram" to get a new one.');
+      // One chat follows one Dueboard account.
+      run('UPDATE users SET tg_chat_id = NULL WHERE tg_chat_id = ? AND id != ?', chatId, target.id);
+      run('UPDATE users SET tg_chat_id = ?, tg_link_code = NULL WHERE id = ?', chatId, target.id);
+      return reply(linkedText(target.username));
     }
-    run('UPDATE users SET tg_chat_id = ?, tg_link_code = NULL WHERE id = ?', chatId, user.id);
-    await telegram.send(chatId, `Linked to Dueboard as ${user.username}. You'll get reminders 3 days and 1 day before each deadline.`);
+    if (command === '/deadlines') {
+      return reply(user ? deadlinesText(boardItems(user), now()) : NOT_LINKED);
+    }
+    if (command === '/digest') {
+      if (!user) return reply(NOT_LINKED);
+      const on = !user.tg_digest;
+      run('UPDATE users SET tg_digest = ? WHERE id = ?', on ? 1 : 0, user.id);
+      return reply(on
+        ? `Morning digest is on. You'll get it at ${DIGEST_HOUR}:00 when something is due that week.`
+        : 'Morning digest is off. Reminders 3 days and 1 day before each deadline still come. Send /digest to turn it back on.');
+    }
+    if (command === '/stop') {
+      if (!user) return reply(NOT_LINKED);
+      run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
+      return reply('Unlinked. You will not get any more messages. Connect again from Dueboard → Settings.');
+    }
+    return reply(helpText(Boolean(user)));
   }
 
   async function runReminders() {
@@ -615,15 +665,26 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
         all('SELECT item_key, kind FROM reminders_sent WHERE user_id = ?', user.id).map((r) => `${r.item_key}:${r.kind}`),
       );
       for (const { item, kind } of dueReminders(boardItems(user), sent, t)) {
-        try {
-          await telegram.send(user.tg_chat_id, reminderText(item, kind));
-          run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
-          // The 1-day reminder makes the 3-day one pointless.
-          if (kind === '1d') run(`INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, '3d')`, user.id, item.key);
-        } catch (err) {
-          console.error(`Reminder to ${user.username} failed:`, err.message);
-        }
+        if (!(await sendTo(user, reminderText(item, kind)))) break;
+        run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
+        // The 1-day reminder makes the 3-day one pointless.
+        if (kind === '1d') run(`INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, '3d')`, user.id, item.key);
       }
+    }
+  }
+
+  // Morning digest: once a day after DIGEST_HOUR (Kyiv time), only when something is due within 7 days.
+  async function runDigests() {
+    const t = now();
+    const { date, hour } = localParts(t);
+    if (hour < DIGEST_HOUR || hour >= DIGEST_HOUR + DIGEST_WINDOW) return;
+    const users = all(
+      `SELECT * FROM users WHERE tg_chat_id IS NOT NULL AND tg_digest = 1 AND (tg_digest_on IS NULL OR tg_digest_on != ?)`, date,
+    );
+    for (const user of users) {
+      const message = digestText(boardItems(user), t);
+      if (message && !(await sendTo(user, message))) continue;
+      run('UPDATE users SET tg_digest_on = ? WHERE id = ?', date, user.id);
     }
   }
 
@@ -638,5 +699,5 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     }
   }
 
-  return { handler, handleTelegramUpdate, runReminders, syncAll };
+  return { handler, handleTelegramUpdate, runReminders, runDigests, syncAll };
 }

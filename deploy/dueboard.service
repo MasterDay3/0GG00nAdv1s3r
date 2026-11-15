@@ -8,6 +8,8 @@ User=dueboard
 Group=dueboard
 WorkingDirectory=/opt/dueboard
 EnvironmentFile=/etc/dueboard.env
+# Calendar days (study plan) follow Kyiv time.
+Environment=TZ=Europe/Kyiv
 ExecStart=/usr/bin/node src/main.js
 Restart=always
 RestartSec=3
