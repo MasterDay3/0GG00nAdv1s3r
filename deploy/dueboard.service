@@ -1,0 +1,21 @@
+[Unit]
+Description=Dueboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dueboard
+Group=dueboard
+WorkingDirectory=/opt/dueboard
+EnvironmentFile=/etc/dueboard.env
+ExecStart=/usr/bin/node src/main.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dueboard
+
+[Install]
+WantedBy=multi-user.target
