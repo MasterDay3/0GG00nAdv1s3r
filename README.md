@@ -38,6 +38,10 @@ sudo SITE_ADDRESS="dueboard.xyz, www.dueboard.xyz" bash setup.sh   # with the do
 
 Settings live in `/etc/dueboard.env` (kept between runs). Logs: `journalctl -u dueboard -f`.
 
+**Auto-deploy.** Merging into `main` is enough: every minute the server checks GitHub, runs `npm test` on a new
+commit, deploys it and checks that the app answers. If the tests fail the commit is skipped; if the new version does not
+start, the server rolls back to the previous commit. Logs: `journalctl -u dueboard-autodeploy`.
+
 ## Moodle sync through the Chrome extension
 
 UCU Moodle (`learn.ucu.edu.ua`) sits behind a Cloudflare bot check, so the server cannot download the calendar link itself.

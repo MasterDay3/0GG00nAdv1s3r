@@ -4,7 +4,8 @@
 #   sudo SITE_ADDRESS=dueboard.com.ua bash deploy/setup.sh   # with a domain: HTTPS via Let's Encrypt
 #   sudo bash deploy/setup.sh                                # no domain yet: plain HTTP on the server's IP
 #
-# Optional: BRANCH (default main), REPO (default the GitHub repo).
+# Optional: BRANCH (default main), COMMIT (a commit on it; default its latest), REPO (default the GitHub repo).
+# It also turns on auto-deploy: deploy/autodeploy.sh checks GitHub every minute and deploys new commits.
 # Settings live in /etc/dueboard.env (kept between runs; put TELEGRAM_BOT_TOKEN there).
 set -euo pipefail
 
@@ -41,10 +42,10 @@ install -d -o dueboard -g dueboard -m 750 "$DATA_DIR"
 
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
-  git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
 else
   git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR"
 fi
+git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "${COMMIT:-origin/$BRANCH}"
 
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<ENV
@@ -78,8 +79,11 @@ PRIMARY="$(echo "$SITE" | cut -d, -f1 | xargs)"
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
 install -m 644 "$APP_DIR/deploy/dueboard.service" /etc/systemd/system/dueboard.service
+# install writes a new file, so a copy of the script that is running right now is not changed under it.
+install -m 755 "$APP_DIR/deploy/autodeploy.sh" /usr/local/bin/dueboard-autodeploy
+install -m 644 "$APP_DIR/deploy/dueboard-autodeploy.service" "$APP_DIR/deploy/dueboard-autodeploy.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now dueboard caddy
+systemctl enable --now dueboard caddy dueboard-autodeploy.timer
 systemctl restart dueboard
 systemctl reload caddy || systemctl restart caddy
 

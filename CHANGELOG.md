@@ -33,6 +33,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `api`: Telegram bot commands `/deadlines`, `/digest`, `/help`, `/stop`, shown in the bot's command menu.
 - `api`: Morning Telegram digest at 08:00 Kyiv time with deadlines due in the next 7 days (can be turned off with `/digest`).
 - `api`: Telegram message to group members when someone adds a group deadline.
+- `infra`: Auto-deploy: the server checks GitHub `main` every minute, tests new commits, deploys them and rolls back if the app does not start.
 
 ### Fixed
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).
