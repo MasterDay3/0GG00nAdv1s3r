@@ -10,6 +10,9 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 
 ## [Unreleased]
 
+### Changed
+- `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
+
 ### Added
 - `infra`: CHANGELOG.md to track changes from the first commit.
 - `infra`: Zero-dependency Node.js server (`node:http`, `node:sqlite`), `npm start` / `npm test`.

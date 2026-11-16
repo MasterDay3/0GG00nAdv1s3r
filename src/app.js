@@ -23,10 +23,13 @@ const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/tokens.css': ['tokens.css', 'text/css; charset=utf-8'],
+  '/base.css': ['base.css', 'text/css; charset=utf-8'],
 };
 
 const SECURITY_HEADERS = {
-  'content-security-policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'content-security-policy': "default-src 'self'; img-src 'self' data:; "
+    + "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
 };

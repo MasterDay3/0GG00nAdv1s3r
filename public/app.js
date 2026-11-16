@@ -107,14 +107,18 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-function todayStr() {
-  const d = new Date();
+function dateOf(ms) {
+  const d = new Date(ms);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function todayStr() {
+  return dateOf(Date.now());
+}
+
 function setView(...nodes) {
-  main.replaceChildren(...nodes.filter(Boolean));
+  main.replaceChildren(...nodes.flat(Infinity).filter(Boolean));
 }
 
 // ---------- routing ----------
@@ -130,7 +134,7 @@ async function render() {
     else if (view === 'settings') await showSettings();
     else await showBoard();
   } catch (err) {
-    if (me) setView(h('div', { class: 'card' }, h('p', {}, err.message), h('a', { href: '#/board' }, 'Back to board')));
+    if (me) setView(h('div', { class: 'panel empty' }, h('p', {}, err.message), h('p', {}, h('a', { href: '#/board' }, 'Back to board'))));
   }
 }
 
@@ -184,7 +188,7 @@ function showAuth() {
   setView(h('div', { class: 'auth' },
     h('h1', {}, 'Dueboard'),
     h('p', { class: 'tagline' }, 'Every course deadline in one list, and a study coach for the week before the exam.'),
-    h('div', { class: 'card' }, h('div', { class: 'tabs' }, tabs), form)));
+    h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form)));
 }
 
 // ---------- board ----------
@@ -223,22 +227,50 @@ function deadlineRow(item, now, reload) {
     ? h('a', { href: `#/prep/${item.id}`, class: 'title' }, `Exam: ${item.title}`)
     : href ? h('a', { href, class: 'title', target: '_blank', rel: 'noopener noreferrer' }, item.title)
       : h('span', { class: 'title' }, item.title);
-  return h('div', { class: `item ${item.urgency}` },
-    h('div', { class: 'bar', 'aria-hidden': 'true' }),
-    h('div', {},
-      h('div', { class: 'meta' }, item.course ? h('strong', {}, item.course) : null, h('span', { class: 'badge' }, SOURCE_LABEL[item.source])),
-      titleNode),
-    h('div', { class: 'when' },
-      h('strong', {}, item.urgency === 'overdue' ? 'Past due' : relative(item.dueAt, now)),
-      h('span', { class: 'muted' }, fmtDate(item.dueAt)),
-      item.canDelete ? h('div', {}, h('button', {
+  return h('li', { class: `item ${item.urgency}` },
+    h('div', { class: 'due' },
+      h('time', { class: 'num', datetime: new Date(item.dueAt).toISOString(), title: fmtDate(item.dueAt) }, fmtTime(item.dueAt)),
+      h('span', { class: `chip ${item.urgency}` }, item.urgency === 'overdue' ? 'Past due' : relative(item.dueAt, now))),
+    h('div', { class: 'what' },
+      titleNode,
+      h('div', { class: 'meta' }, item.course ? h('span', {}, item.course) : null, h('span', { class: 'tag' }, SOURCE_LABEL[item.source]))),
+    h('div', { class: 'item-actions' },
+      item.canDelete ? h('button', {
         type: 'button', class: 'danger small',
         onclick: async () => {
           if (!confirm(`Delete "${item.title}"?`)) return;
           if (await act(() => api('DELETE', `/api/deadlines/${item.id}`), 'Deleted')) reload();
         },
-      }, 'Delete')) : null),
+      }, 'Delete') : null),
     noteEditor(item));
+}
+
+function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function dayLabel(dateStr) {
+  const today = todayStr();
+  if (dateStr === today) return 'Today';
+  const [y, m, d] = today.split('-').map(Number);
+  const tomorrow = new Date(y, m - 1, d + 1);
+  if (dateStr === dateOf(tomorrow.getTime())) return 'Tomorrow';
+  return new Date(dateStr.replace(/-/g, '/')).toLocaleDateString('en-GB', { weekday: 'long' });
+}
+
+// The next deadline, open as a notebook card.
+function nextCard(item, now) {
+  const href = item.source === 'exam' ? `#/prep/${item.id}` : safeHref(item.url);
+  const title = item.source === 'exam' ? `Exam: ${item.title}` : item.title;
+  return h('aside', { class: 'next', 'aria-label': 'Next deadline' },
+    h('div', { class: 'next-head' }, h('span', {}, 'Next up'), h('span', { class: 'num' }, fmtDay(dateOf(item.dueAt)))),
+    h('div', { class: 'next-time' }, fmtTime(item.dueAt)),
+    h('dl', { class: 'next-cells' },
+      h('div', { class: 'wide' }, h('dt', {}, 'What'), h('dd', {}, href
+        ? h('a', item.source === 'exam' ? { href } : { href, target: '_blank', rel: 'noopener noreferrer' }, title)
+        : title)),
+      h('div', {}, h('dt', {}, 'Due'), h('dd', {}, relative(item.dueAt, now))),
+      h('div', {}, h('dt', {}, item.course ? 'Course' : 'From'), h('dd', {}, item.course || SOURCE_LABEL[item.source]))));
 }
 
 function addDeadlineForm(reload) {
@@ -266,7 +298,7 @@ function addDeadlineForm(reload) {
       ? h('label', { class: 'inline' }, h('input', { type: 'checkbox', name: 'shared' }), `Share with my group (${me.group.name})`)
       : h('span', { class: 'muted small' }, 'Join a group in Settings to share deadlines with classmates.'),
     h('button', { type: 'submit', class: 'shrink' }, 'Add deadline')));
-  return h('details', { class: 'card' }, h('summary', {}, '+ Add a deadline that is not in Moodle'), h('div', { class: 'spacer' }), form);
+  return h('details', { class: 'panel compact add-deadline' }, h('summary', {}, 'Add a deadline that is not in Moodle'), form);
 }
 
 async function showBoard() {
@@ -284,28 +316,50 @@ async function showBoard() {
     }), `Show past (${past.length})`);
 
   const list = [...(showPast ? past : []), ...upcoming];
+
+  // Rule the ledger by day; everything past due sits in one group at the top.
+  const groups = [];
+  for (const item of list) {
+    const key = item.urgency === 'overdue' ? 'past' : dateOf(item.dueAt);
+    if (groups.at(-1)?.key !== key) groups.push({ key, items: [] });
+    groups.at(-1).items.push(item);
+  }
+
+  const syncButton = me.icsUrl ? h('button', {
+    type: 'button', class: 'secondary',
+    onclick: async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.textContent = 'Syncing…';
+      const r = await act(syncMoodle);
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      btn.textContent = 'Sync Moodle';
+      if (r) { toast(`Synced ${r.imported} Moodle events`); render(); }
+    },
+  }, 'Sync Moodle') : null;
+
   setView(
-    h('div', { class: 'toolbar' },
+    h('div', { class: 'board-head' },
       h('div', {},
         h('h1', {}, 'Your deadlines'),
-        h('p', { class: 'muted' },
-          `${counts.red} due within 48 h · ${counts.amber} this week`,
-          me.icsUrl ? null : [' · ', h('a', { href: '#/settings' }, 'Connect Moodle')])),
-      h('div', { class: 'row' },
-        me.icsUrl ? h('button', {
-          type: 'button', class: 'secondary shrink',
-          onclick: async (e) => {
-            e.target.disabled = true;
-            const r = await act(syncMoodle);
-            e.target.disabled = false;
-            if (r) { toast(`Synced ${r.imported} Moodle events`); render(); }
-          },
-        }, 'Sync Moodle') : null,
-        pastToggle)),
+        h('dl', { class: 'counts' },
+          h('div', { class: 'red' }, h('dt', {}, 'due within 48 h'), h('dd', {}, counts.red)),
+          h('div', { class: 'amber' }, h('dt', {}, 'this week'), h('dd', {}, counts.amber))),
+        h('div', { class: 'board-actions' },
+          syncButton,
+          me.icsUrl ? null : h('a', { href: '#/settings' }, 'Connect Moodle'),
+          pastToggle)),
+      upcoming.length ? nextCard(upcoming[0], now) : null),
     addDeadlineForm(render),
     list.length
-      ? h('div', { class: 'list' }, list.map((item) => deadlineRow(item, now, render)))
-      : h('div', { class: 'card empty' },
+      ? groups.map((g) => h('section', { class: 'day' },
+        h('div', { class: 'day-head' },
+          h('h2', {}, g.key === 'past' ? 'Past due' : dayLabel(g.key)),
+          g.key === 'past' ? null : h('span', { class: 'num' }, new Date(g.key.replace(/-/g, '/')).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))),
+        h('ul', { class: 'ledger' }, g.items.map((item) => deadlineRow(item, now, render)))))
+      : h('div', { class: 'panel empty' },
         h('p', {}, 'No deadlines yet.'),
         h('p', {}, h('a', { href: '#/settings' }, 'Connect your Moodle calendar'), ' or add one above.')),
   );
@@ -380,7 +434,7 @@ function extensionCard() {
     }, 'Connect extension')];
   }
   return [
-    h('p', {}, '✅ Connected. Your deadlines refresh every hour and whenever you open Moodle.'),
+    h('p', {}, h('span', { class: 'status-ok' }, 'Connected'), ' Your deadlines refresh every hour and whenever you open Moodle.'),
     h('div', { class: 'row' },
       h('button', {
         type: 'button', class: 'shrink',
@@ -469,7 +523,8 @@ async function showSettings() {
         },
       }, h('label', {}, '…or create one', h('input', { name: 'name', required: true, maxlength: 80, placeholder: 'e.g. CS-2, 2nd year' })), h('button', { type: 'submit', class: 'shrink secondary' }, 'Create')));
 
-  const extensionSection = h('section', { class: 'card' }, h('h2', {}, 'Automatic sync (Chrome extension)'), extensionCard());
+  const setting = (title, ...body) => h('section', { class: 'setting' }, h('h2', {}, title), h('div', { class: 'setting-body' }, body));
+  const extensionSection = setting('Automatic sync (Chrome extension)', extensionCard());
 
   const tgBox = h('div', {});
   const renderTelegram = () => {
@@ -477,7 +532,7 @@ async function showSettings() {
       tgBox.replaceChildren(h('p', { class: 'muted' }, 'The Telegram bot is off on this server. Start it with TELEGRAM_BOT_TOKEN set to turn on reminders.'));
     } else if (me.telegram.linked) {
       tgBox.replaceChildren(
-        h('p', {}, '✅ Linked. Reminders arrive 3 days and 1 day before each deadline, plus a morning digest when something is due that week.'),
+        h('p', {}, h('span', { class: 'status-ok' }, 'Linked'), ' Reminders arrive 3 days and 1 day before each deadline, plus a morning digest when something is due that week.'),
         h('p', { class: 'muted' }, 'In the bot: /deadlines lists what is due, /digest turns the digest on or off, /stop unlinks.'),
         h('button', {
           type: 'button', class: 'secondary',
@@ -503,16 +558,16 @@ async function showSettings() {
   renderTelegram();
 
   setView(
-    h('h1', {}, 'Settings'),
-    h('p', { class: 'muted' }, `Signed in as ${me.username}`),
-    h('section', { class: 'card' },
-      h('h2', {}, 'Connect Moodle'),
+    h('div', { class: 'page-head' },
+      h('h1', {}, 'Settings'),
+      h('p', { class: 'muted' }, 'Signed in as ', h('strong', {}, me.username))),
+    setting('Connect Moodle',
       h('p', { class: 'muted small' }, 'In Moodle open Calendar → Import or export calendars → Export calendar, choose "All events" and "Recent and next 60 days", then "Get calendar URL". It is a read-only link: no password, no full-access token.'),
       moodleForm),
     extensionSection,
-    h('section', { class: 'card' }, h('h2', {}, 'Your group'), groupCard),
-    h('section', { class: 'card' }, h('h2', {}, 'Telegram reminders'), tgBox),
-    h('section', { class: 'card' }, importBox));
+    setting('Your group', groupCard),
+    setting('Telegram reminders', tgBox),
+    setting('Import a file', importBox));
 }
 
 // ---------- exam prep ----------
@@ -535,14 +590,16 @@ async function showPrep() {
     h('button', { type: 'submit', class: 'shrink' }, 'Add exam')));
 
   setView(
-    h('h1', {}, 'Exam prep'),
-    h('p', { class: 'muted' }, 'Add your exam, its topics and some questions. A diagnostic test shows your weak topics and builds a day-by-day plan up to the exam. Practice only — never for graded Moodle quizzes.'),
-    h('section', { class: 'card' }, h('h2', {}, 'New exam'), form),
+    h('div', { class: 'page-head' },
+      h('h1', {}, 'Exam prep'),
+      h('p', { class: 'muted' }, 'Add your exam, its topics and some questions. A diagnostic test shows your weak topics and builds a day-by-day plan up to the exam. Practice only — never for graded Moodle quizzes.')),
     exams.length
-      ? h('div', { class: 'list' }, exams.map((ex) => h('a', { class: 'card exam-link', href: `#/prep/${ex.id}` },
-        h('div', {}, h('div', { class: 'muted small' }, ex.course || ' '), h('h3', {}, ex.title)),
-        h('div', { class: 'when' }, h('strong', {}, relative(ex.examAt)), h('span', { class: 'muted' }, fmtDate(ex.examAt))))))
-      : h('div', { class: 'card empty' }, 'No exams yet.'),
+      ? h('ul', { class: 'exam-list' }, exams.map((ex) => h('li', {}, h('a', { class: 'exam-link', href: `#/prep/${ex.id}` },
+        h('span', { class: 'num' }, fmtDate(ex.examAt)),
+        h('div', {}, h('h3', {}, ex.title), ex.course ? h('div', { class: 'muted small' }, ex.course) : null),
+        h('span', { class: `chip ${ex.examAt - Date.now() < 7 * 86_400_000 ? 'amber' : ''}` }, relative(ex.examAt))))))
+      : h('div', { class: 'panel empty' }, 'No exams yet.'),
+    h('section', { class: 'panel spaced' }, h('h2', {}, 'New exam'), form),
   );
 }
 
@@ -561,7 +618,7 @@ function questionForm(topic, reload) {
     h('label', { class: 'grow' }, 'Answer options, one per line (2–6)', h('textarea', { name: 'options', required: true })),
     h('label', {}, 'Correct option #', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: '1', required: true }))),
   h('button', { type: 'submit' }, 'Add question'));
-  return h('details', {}, h('summary', {}, '+ Add a question'), form);
+  return h('details', {}, h('summary', {}, 'Add a question'), form);
 }
 
 function problemForm(topic, reload) {
@@ -573,7 +630,7 @@ function problemForm(topic, reload) {
   },
   h('label', {}, 'Practice problem', h('textarea', { name: 'text', required: true, maxlength: 4000 })),
   h('button', { type: 'submit' }, 'Add problem'));
-  return h('details', {}, h('summary', {}, '+ Add a practice problem'), form);
+  return h('details', {}, h('summary', {}, 'Add a practice problem'), form);
 }
 
 function topicBlock(topic, reload) {
@@ -584,14 +641,16 @@ function topicBlock(topic, reload) {
   return h('div', { class: 'topic' },
     h('div', { class: 'head' },
       h('h3', {}, topic.name),
-      h('span', { class: 'muted small' }, `${plural(topic.questions.length, 'question')} · ${plural(topic.problems.length, 'problem')}`,
+      h('div', { class: 'tools' },
+        h('span', { class: 'chip' }, plural(topic.questions.length, 'question')),
+        h('span', { class: 'chip' }, plural(topic.problems.length, 'problem')),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/topics/${topic.id}`, 'topic and all its questions') }, 'Delete topic'))),
     topic.questions.map((q) => h('div', { class: 'q' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, q.prompt),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'question') }, 'Delete')),
       h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))))),
     topic.problems.map((p) => h('div', { class: 'q' },
-      h('div', { class: 'head' }, h('span', { class: 'pre' }, `📝 ${p.text}`),
+      h('div', { class: 'head' }, h('span', { class: 'pre' }, h('span', { class: 'kind' }, 'Practice problem'), p.text),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/problems/${p.id}`, 'problem') }, 'Delete')))),
     questionForm(topic, reload),
     problemForm(topic, reload));
@@ -608,7 +667,7 @@ function readAsBase64(file) {
 
 function materialsBlock(exam, reload) {
   const input = h('input', { type: 'file', multiple: true, accept: '.pdf,.ppt,.pptx,.doc,.docx,.txt,.md,image/*' });
-  return h('section', { class: 'card' },
+  return h('section', { class: 'panel' },
     h('h2', {}, 'Lecture slides & materials'),
     exam.materials.length
       ? h('ul', { class: 'files' }, exam.materials.map((m) => h('li', {},
@@ -623,7 +682,7 @@ function materialsBlock(exam, reload) {
           }, 'Delete')))))
       : h('p', { class: 'muted' }, 'Keep your slides and problem sets next to the exam. (Up to 10 MB per file.)'),
     h('div', { class: 'row' }, input, h('button', {
-      type: 'button', class: 'shrink',
+      type: 'button', class: 'secondary shrink',
       onclick: async (e) => {
         if (!input.files.length) return toast('Choose a file first', true);
         e.target.disabled = true;
@@ -641,11 +700,11 @@ function resultBlock(exam) {
   if (!exam.result) return null;
   const byName = new Map(exam.topics.map((t) => [t.name, t]));
   const weak = exam.result.topics.filter((r) => r.status === 'weak');
-  return h('section', { class: 'card' },
+  return h('section', { class: 'panel' },
     h('h2', {}, 'Diagnostic result'),
     h('p', { class: 'muted small' }, `Taken ${fmtDate(exam.result.takenAt)}`),
     h('div', { class: 'chips' }, exam.result.topics.map((r) => h('span', { class: `chip ${r.status}` },
-      `${r.name}: ${r.total ? `${r.correct}/${r.total}` : 'no questions'} · ${r.status}`))),
+      `${r.name}: ${r.total ? `${r.correct}/${r.total}` : 'no questions'}, ${r.status}`))),
     weak.length
       ? h('div', {},
         h('h3', { class: 'spaced' }, 'Practise these'),
@@ -657,13 +716,13 @@ function resultBlock(exam) {
               ? problems.map((p) => h('div', { class: 'q pre' }, p.text))
               : h('p', { class: 'muted small' }, 'No practice problems for this topic yet — add some above.'));
         }))
-      : h('p', {}, '🎉 No weak topics. Keep refreshing.'));
+      : h('p', { class: 'spaced' }, 'No weak topics. Keep refreshing.'));
 }
 
 function planBlock(exam) {
   const today = todayStr();
   const label = { practice: 'Practise (weak)', refresh: 'Refresh', review: 'Full review' };
-  return h('section', { class: 'card' },
+  return h('section', { class: 'panel' },
     h('h2', {}, 'Day-by-day plan'),
     exam.plan.length
       ? h('table', { class: 'plan' },
@@ -688,15 +747,17 @@ async function showExam(id) {
       if (await act(() => api('POST', `/api/exams/${id}/topics`, { name: e.target.name.value }), 'Topic added')) reload();
     },
   }, h('label', { class: 'grow' }, 'New topic', h('input', { name: 'name', required: true, maxlength: 120, placeholder: 'e.g. Limits' })),
-  h('button', { type: 'submit', class: 'shrink' }, 'Add topic'));
+  h('button', { type: 'submit', class: 'secondary shrink' }, 'Add topic'));
 
   setView(
-    h('p', {}, h('a', { href: '#/prep' }, '← All exams')),
-    h('div', { class: 'head' },
+    h('a', { class: 'back', href: '#/prep' }, 'All exams'),
+    h('div', { class: 'head page-head' },
       h('div', {},
-        h('div', { class: 'muted' }, exam.course),
+        exam.course ? h('p', { class: 'muted' }, exam.course) : null,
         h('h1', {}, exam.title),
-        h('p', {}, `${fmtDate(exam.examAt)} · ${relative(exam.examAt)}`)),
+        h('div', { class: 'exam-meta' },
+          h('time', { class: 'num', datetime: new Date(exam.examAt).toISOString() }, fmtDate(exam.examAt)),
+          h('span', { class: 'chip amber' }, relative(exam.examAt)))),
       h('button', {
         type: 'button', class: 'danger',
         onclick: async () => {
@@ -704,7 +765,7 @@ async function showExam(id) {
           if (await act(() => api('DELETE', `/api/exams/${id}`), 'Exam deleted')) location.hash = '#/prep';
         },
       }, 'Delete exam')),
-    h('section', { class: 'card' },
+    h('section', { class: 'panel' },
       h('div', { class: 'head' },
         h('h2', {}, 'Diagnostic test'),
         h('button', { type: 'button', disabled: !questionCount, onclick: () => showTest(exam) }, exam.result ? 'Retake test' : 'Take the test')),
@@ -713,7 +774,7 @@ async function showExam(id) {
         : 'Add topics and a few questions below, then take the test.')),
     resultBlock(exam),
     planBlock(exam),
-    h('section', { class: 'card' },
+    h('section', { class: 'panel' },
       h('h2', {}, 'Topics & questions'),
       exam.topics.map((t) => topicBlock(t, reload)),
       h('div', { class: 'topic' }, topicForm)),
@@ -746,10 +807,11 @@ async function showTest(exam) {
     h('button', { type: 'button', class: 'secondary shrink', onclick: render }, 'Cancel')));
 
   setView(
-    h('p', {}, h('a', { href: `#/prep/${exam.id}`, onclick: (e) => { e.preventDefault(); render(); } }, `← ${exam.title}`)),
-    h('h1', {}, 'Diagnostic test'),
-    h('p', { class: 'muted' }, 'Answer honestly — the goal is to find what you do not know yet.'),
-    h('section', { class: 'card' }, form));
+    h('a', { class: 'back', href: `#/prep/${exam.id}`, onclick: (e) => { e.preventDefault(); render(); } }, exam.title),
+    h('div', { class: 'page-head' },
+      h('h1', {}, 'Diagnostic test'),
+      h('p', { class: 'muted' }, 'Answer honestly — the goal is to find what you do not know yet.')),
+    h('section', { class: 'panel' }, form));
   window.scrollTo(0, 0);
 }
 
