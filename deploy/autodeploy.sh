@@ -5,9 +5,9 @@
 # until a newer one arrives. Logs: journalctl -u dueboard-autodeploy
 set -euo pipefail
 
-APP_DIR=/opt/dueboard
+APP_DIR="${APP_DIR:-/opt/dueboard}"
 BRANCH="${BRANCH:-main}"
-STATE_DIR=/var/lib/dueboard-autodeploy
+STATE_DIR="${STATE_DIR:-/var/lib/dueboard-autodeploy}"
 HEALTH_URL=http://127.0.0.1:3000/api/me
 
 exec 9>/run/dueboard-autodeploy.lock
