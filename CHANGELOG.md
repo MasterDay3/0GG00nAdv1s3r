@@ -10,6 +10,9 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 
 ## [Unreleased]
 
+### Security
+- `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
+
 ### Changed
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 

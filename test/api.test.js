@@ -483,3 +483,41 @@ test('materials: upload, download as attachment, owner-only', async (t) => {
   assert.equal(download.data, '<script>alert(1)</script>');
   assert.equal((await other('GET', `/api/materials/${material.id}`)).status, 404);
 });
+
+test('auth: wrong passwords are limited per address and account, the real address comes from the proxy', async (t) => {
+  let clock = NOW;
+  const { base, close } = await start({ now: () => clock });
+  t.after(close);
+  await signedUp(base, 'mykola');
+  const login = (password, ip) => fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(ip ? { 'x-forwarded-for': `6.6.6.6, ${ip}` } : {}) },
+    body: JSON.stringify({ username: 'mykola', password }),
+  });
+
+  for (let i = 0; i < 5; i++) assert.equal((await login('wrong password', '1.1.1.1')).status, 401);
+  const blocked = await login('correct horse', '1.1.1.1');
+  assert.equal(blocked.status, 429, 'even the right password waits once the limit is hit');
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0);
+  // Another address (the last X-Forwarded-For entry, set by Caddy) is not blocked.
+  assert.equal((await login('correct horse', '2.2.2.2')).status, 200);
+
+  clock += 16 * 60 * 1000;
+  assert.equal((await login('correct horse', '1.1.1.1')).status, 200, 'the block expires');
+  // A success clears the count for that address.
+  for (let i = 0; i < 4; i++) await login('wrong password', '1.1.1.1');
+  assert.equal((await login('correct horse', '1.1.1.1')).status, 200);
+  assert.equal((await login('wrong password', '1.1.1.1')).status, 401);
+});
+
+test('auth: one address cannot create accounts without end', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const register = (username) => fetch(`${base}/api/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': '3.3.3.3' },
+    body: JSON.stringify({ username, password: 'correct horse' }),
+  });
+  for (let i = 0; i < 20; i++) assert.equal((await register(`user${i}`)).status, 200);
+  assert.equal((await register('user20')).status, 429);
+});

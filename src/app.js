@@ -8,6 +8,7 @@ import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
 import { createAi, COUNT } from './ai.js';
+import { createLimiter, clientIp } from './limiter.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -18,6 +19,7 @@ const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
+const MINUTE = 60 * 1000;
 const BOT_WALL_MESSAGE = 'Your Moodle is behind a bot check that blocks automatic sync. '
   + 'In Moodle use Export calendar → "Export" to download the .ics file, then import it below.';
 
@@ -105,6 +107,27 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   const one = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
+
+  // ---------- brute-force limits ----------
+
+  const limits = {
+    // Every login attempt from one address, right or wrong (generous: a campus shares one address).
+    loginIp: createLimiter({ limit: 100, windowMs: 15 * MINUTE, now }),
+    // Wrong passwords for one account from one address.
+    loginFails: createLimiter({ limit: 5, windowMs: 15 * MINUTE, now }),
+    // Wrong passwords for one account from anywhere: a slow, spread-out guess.
+    accountFails: createLimiter({ limit: 30, windowMs: 60 * MINUTE, now }),
+    registerIp: createLimiter({ limit: 20, windowMs: 60 * MINUTE, now }),
+  };
+
+  function guard(res, ...checks) {
+    const wait = Math.max(...checks.map(([limiter, key]) => limiter.blockedFor(key)));
+    if (wait > 0) {
+      const seconds = Math.ceil(wait / 1000);
+      res.setHeader('retry-after', String(seconds));
+      throw new HttpError(429, `Too many attempts. Try again in ${Math.ceil(seconds / 60)} min.`);
+    }
+  }
 
   // ---------- sessions ----------
 
@@ -300,24 +323,37 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   // ---------- routes: accounts ----------
 
-  route('POST', '/api/register', async ({ body, res }) => {
+  route('POST', '/api/register', async ({ req, body, res }) => {
+    const ip = clientIp(req);
+    guard(res, [limits.registerIp, ip]);
     const username = text(body.username, 'Username', { max: 32 });
     if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Username: 3–32 letters, digits or _');
     if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 200) {
       throw new HttpError(400, 'Password must be at least 8 characters');
     }
     if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'That username is taken');
+    limits.registerIp.hit(ip);
     const { lastInsertRowid } = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(body.password));
     startSession(res, Number(lastInsertRowid));
     return { ok: true };
   }, { auth: false });
 
-  route('POST', '/api/login', async ({ body, res }) => {
-    const username = typeof body.username === 'string' ? body.username.trim() : '';
-    const password = typeof body.password === 'string' ? body.password : '';
+  route('POST', '/api/login', async ({ req, body, res }) => {
+    const username = typeof body.username === 'string' ? body.username.trim().slice(0, 64) : '';
+    const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
+    const ip = clientIp(req);
+    const account = username.toLowerCase();
+    const pair = `${ip} ${account}`;
+    guard(res, [limits.loginIp, ip], [limits.loginFails, pair], [limits.accountFails, account]);
+    limits.loginIp.hit(ip);
     const user = one('SELECT * FROM users WHERE username = ?', username);
     const valid = await verifyPassword(password, user ? user.pass_hash : DUMMY_HASH);
-    if (!user || !valid) throw new HttpError(401, 'Wrong username or password');
+    if (!user || !valid) {
+      limits.loginFails.hit(pair);
+      limits.accountFails.hit(account);
+      throw new HttpError(401, 'Wrong username or password');
+    }
+    limits.loginFails.reset(pair);
     startSession(res, user.id);
     return { ok: true };
   }, { auth: false });
