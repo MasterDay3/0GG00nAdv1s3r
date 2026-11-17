@@ -521,3 +521,86 @@ test('auth: one address cannot create accounts without end', async (t) => {
   for (let i = 0; i < 20; i++) assert.equal((await register(`user${i}`)).status, 200);
   assert.equal((await register('user20')).status, 429);
 });
+
+test('account: change password signs out other devices, log out everywhere', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const laptop = await signedUp(base, 'mykola');
+  const phone = client(base);
+  assert.equal((await phone('POST', '/api/login', { username: 'mykola', password: 'correct horse' })).status, 200);
+
+  assert.equal((await laptop('PUT', '/api/password', { current: 'wrong one', password: 'battery staple' })).status, 403);
+  assert.equal((await laptop('PUT', '/api/password', { current: 'correct horse', password: 'short' })).status, 400);
+  assert.equal((await laptop('PUT', '/api/password', { current: 'correct horse', password: 'battery staple' })).status, 200);
+  assert.equal((await laptop('GET', '/api/me')).status, 200, 'the device that changed it stays signed in');
+  assert.equal((await phone('GET', '/api/me')).status, 401, 'other devices are signed out');
+  assert.equal((await phone('POST', '/api/login', { username: 'mykola', password: 'correct horse' })).status, 401);
+  assert.equal((await phone('POST', '/api/login', { username: 'mykola', password: 'battery staple' })).status, 200);
+
+  assert.equal((await phone('POST', '/api/logout-all', {})).status, 200);
+  assert.equal((await phone('GET', '/api/me')).status, 401);
+  assert.equal((await laptop('GET', '/api/me')).status, 401);
+});
+
+test('account: delete needs the username and password and removes the data', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const anna = await signedUp(base, 'anna');
+  const { code } = (await mykola('POST', '/api/group', { name: 'CS-2' })).data;
+  await anna('POST', '/api/group/join', { code });
+  await mykola('POST', '/api/deadlines', { title: 'Mine', dueAt: NOW + DAY });
+  await mykola('POST', '/api/deadlines', { title: 'Team report', dueAt: NOW + DAY, shared: true });
+  await mykola('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * DAY });
+
+  assert.equal((await mykola('DELETE', '/api/account', { confirm: 'mykola', password: 'nope nope' })).status, 403);
+  assert.equal((await mykola('DELETE', '/api/account', { confirm: 'anna', password: 'correct horse' })).status, 400);
+  assert.equal((await mykola('DELETE', '/api/account', { confirm: 'mykola', password: 'correct horse' })).status, 200);
+  assert.equal((await mykola('GET', '/api/me')).status, 401);
+  assert.equal((await client(base)('POST', '/api/login', { username: 'mykola', password: 'correct horse' })).status, 401);
+  // The group keeps the deadline that was shared with it; nothing else of the account is left.
+  assert.deepEqual((await anna('GET', '/api/deadlines')).data.items.map((i) => i.title), ['Team report']);
+  // The username is free again.
+  assert.equal((await client(base)('POST', '/api/register', { username: 'mykola', password: 'correct horse' })).status, 200);
+});
+
+test('account: password reset with a code sent to the linked Telegram chat', async (t) => {
+  let clock = NOW;
+  const { app, base, sent, close } = await start({ now: () => clock });
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const { code: link } = (await mykola('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 5, type: 'private' }, text: `/start ${link}` } });
+  await signedUp(base, 'anna'); // no Telegram
+  const anon = client(base);
+
+  // Same answer for an unknown user, a user without Telegram and a linked one; only the linked one gets a code.
+  for (const username of ['nobody', 'anna', 'mykola']) {
+    assert.deepEqual((await anon('POST', '/api/password-reset', { username })).data, { ok: true });
+  }
+  const message = sent.at(-1);
+  assert.equal(message.chatId, '5');
+  const code = /(\d{6})/.exec(message.text)[1];
+
+  const confirm = (body) => anon('POST', '/api/password-reset/confirm', { username: 'mykola', password: 'battery staple', ...body });
+  assert.equal((await confirm({ code: code === '000000' ? '111111' : '000000' })).status, 400);
+  assert.equal((await confirm({ code, password: 'short' })).status, 400);
+  assert.equal((await confirm({ code })).status, 200);
+  assert.equal((await anon('GET', '/api/me')).data.username, 'mykola', 'signed in with the new password');
+  assert.equal((await mykola('GET', '/api/me')).status, 401, 'old sessions are gone');
+  assert.equal((await confirm({ code })).status, 400, 'a code works once');
+
+  // Codes expire, and five wrong tries burn a code.
+  await anon('POST', '/api/password-reset', { username: 'mykola' });
+  const expired = /(\d{6})/.exec(sent.at(-1).text)[1];
+  clock += 16 * 60 * 1000;
+  assert.equal((await confirm({ code: expired })).status, 400);
+  await anon('POST', '/api/password-reset', { username: 'mykola' });
+  const burnt = /(\d{6})/.exec(sent.at(-1).text)[1];
+  for (let i = 0; i < 5; i++) await confirm({ code: burnt === '000000' ? '111111' : '000000' });
+  assert.equal((await confirm({ code: burnt })).status, 400);
+  // At most three codes per account in 15 minutes (one was already asked for since the clock moved).
+  assert.equal((await anon('POST', '/api/password-reset', { username: 'mykola' })).status, 200);
+  assert.equal((await anon('POST', '/api/password-reset', { username: 'mykola' })).status, 200);
+  assert.equal((await anon('POST', '/api/password-reset', { username: 'mykola' })).status, 429);
+});

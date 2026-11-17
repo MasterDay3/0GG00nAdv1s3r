@@ -193,10 +193,63 @@ function showAuth() {
     },
   }, m === 'login' ? 'Вхід' : 'Реєстрація'));
 
+  const forgot = h('button', { type: 'button', class: 'link small', onclick: () => showReset(form.username.value) }, 'Забули пароль?');
+
   setView(h('div', { class: 'auth' },
     h('h1', {}, 'Dueboard'),
     h('p', { class: 'tagline' }, 'Усі дедлайни курсів в одному списку і помічник для підготовки до екзамену.'),
-    h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form)));
+    h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot))));
+}
+
+// Forgotten password: a code comes to the Telegram chat linked to the account.
+function showReset(username = '') {
+  const error = h('p', { class: 'small', role: 'alert' });
+  const fail = (err) => { error.textContent = err.message; };
+  const back = h('button', { type: 'button', class: 'link small', onclick: showAuth }, '← Назад до входу');
+  const panel = h('div', { class: 'panel' });
+
+  const askForm = h('form', {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      try {
+        await api('POST', '/api/password-reset', { username: askForm.username.value });
+        showCodeForm(askForm.username.value.trim());
+      } catch (err) { fail(err); }
+    },
+  },
+  h('p', { class: 'muted small' }, 'Якщо акаунт прив’язаний до Telegram, бот Dueboard надішле туди код. Без Telegram відновити пароль не вийде: вхід тільки за логіном і паролем.'),
+  h('label', {}, 'Логін', h('input', { name: 'username', autocomplete: 'username', required: true, value: username })),
+  error,
+  h('button', { type: 'submit' }, 'Надіслати код'));
+
+  function showCodeForm(name) {
+    error.textContent = '';
+    const codeForm = h('form', {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = '';
+        try {
+          await api('POST', '/api/password-reset/confirm', { username: name, code: codeForm.code.value, password: codeForm.password.value });
+          await refreshMe();
+          toast('Пароль змінено');
+          location.hash = '#/board';
+          render();
+        } catch (err) { fail(err); }
+      },
+    },
+    h('p', { class: 'muted small' }, `Якщо акаунт ${name} прив’язаний до Telegram, код уже в чаті з ботом. Він діє 15 хвилин.`),
+    h('label', {}, 'Код із Telegram', h('input', { name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', required: true, maxlength: 12 })),
+    h('label', {}, 'Новий пароль', h('input', { name: 'password', type: 'password', autocomplete: 'new-password', required: true, minlength: 8 })),
+    error,
+    h('button', { type: 'submit' }, 'Змінити пароль'));
+    panel.replaceChildren(h('h2', {}, 'Новий пароль'), codeForm, h('p', { class: 'auth-foot' }, back));
+    codeForm.code.focus();
+  }
+
+  panel.replaceChildren(h('h2', {}, 'Відновлення пароля'), askForm, h('p', { class: 'auth-foot' }, back));
+  setView(h('div', { class: 'auth' }, h('h1', {}, 'Dueboard'), panel));
+  askForm.username.focus();
 }
 
 // ---------- board ----------
@@ -598,7 +651,52 @@ async function showSettings() {
     extensionSection,
     setting('Ваша група', groupCard),
     setting('Нагадування в Telegram', tgBox),
-    setting('Імпорт файлу', importBox));
+    setting('Імпорт файлу', importBox),
+    setting('Акаунт', accountCard()));
+}
+
+function accountCard() {
+  const signedOut = () => { me = null; location.hash = '#/board'; render(); };
+
+  const passwordForm = h('form', {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const f = formData(passwordForm);
+      if (await act(() => api('PUT', '/api/password', { current: f.current, password: f.password }), 'Пароль змінено. Інші пристрої вийшли з акаунта.')) passwordForm.reset();
+    },
+  },
+  h('input', { type: 'text', name: 'username', autocomplete: 'username', value: me.username, hidden: true }),
+  h('div', { class: 'row' },
+    h('label', { class: 'grow' }, 'Поточний пароль', h('input', { name: 'current', type: 'password', autocomplete: 'current-password', required: true })),
+    h('label', { class: 'grow' }, 'Новий пароль', h('input', { name: 'password', type: 'password', autocomplete: 'new-password', required: true, minlength: 8 }))),
+  h('button', { type: 'submit', class: 'secondary' }, 'Змінити пароль'));
+
+  const deleteForm = h('form', {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const f = formData(deleteForm);
+      if (!confirm('Видалити акаунт назавжди? Дедлайни, нотатки, екзамени й файли зникнуть, і повернути їх не вийде.')) return;
+      if (await act(() => api('DELETE', '/api/account', { confirm: f.confirm, password: f.password }), 'Акаунт видалено')) signedOut();
+    },
+  },
+  h('p', { class: 'muted small' }, 'Зникнуть ваші дедлайни, нотатки, екзамени, питання й файли. Дедлайни, якими ви поділилися з групою, залишаться в групі.'),
+  h('div', { class: 'row' },
+    h('label', { class: 'grow' }, `Введіть свій логін (${me.username})`, h('input', { name: 'confirm', required: true, autocomplete: 'off' })),
+    h('label', { class: 'grow' }, 'Пароль', h('input', { name: 'password', type: 'password', autocomplete: 'current-password', required: true }))),
+  h('button', { type: 'submit', class: 'danger' }, 'Видалити акаунт'));
+
+  return [
+    h('details', {}, h('summary', {}, 'Змінити пароль'), passwordForm),
+    h('details', {},
+      h('summary', {}, 'Вийти на всіх пристроях'),
+      h('p', { class: 'muted small spaced' }, 'Знадобиться, якщо ви входили на чужому комп’ютері. Вийде й цей браузер.'),
+      h('button', {
+        type: 'button', class: 'secondary',
+        onclick: async () => { if (await act(() => api('POST', '/api/logout-all', {}), 'Ви вийшли на всіх пристроях')) signedOut(); },
+      }, 'Вийти всюди')),
+    h('details', {}, h('summary', {}, 'Видалити акаунт'), deleteForm),
+    me.telegram.linked ? null : h('p', { class: 'muted small spaced' }, 'Порада: прив’яжіть Telegram, щоб мати змогу відновити пароль, якщо забудете.'),
+  ];
 }
 
 // ---------- exam prep ----------

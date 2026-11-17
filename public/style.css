@@ -374,3 +374,8 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .generate-form { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .generate-form label.inline { display: inline-flex; align-items: center; gap: var(--space-xs); margin: 0; }
 .count-input { width: 5.5rem; }
+
+/* Account settings and password reset */
+.auth-foot { margin-top: var(--space-sm); text-align: center; }
+.auth .panel > h2 { margin-bottom: var(--space-sm); }
+.setting-body > details + details { margin-top: var(--space-sm); }

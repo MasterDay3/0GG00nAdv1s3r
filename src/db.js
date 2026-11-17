@@ -104,6 +104,12 @@ export function openDb(path = ':memory:') {
   if (!userColumns.includes('tg_digest')) db.exec('ALTER TABLE users ADD COLUMN tg_digest INTEGER NOT NULL DEFAULT 1');
   // Kyiv date ('YYYY-MM-DD') of the last morning digest, so it goes out once a day.
   if (!userColumns.includes('tg_digest_on')) db.exec('ALTER TABLE users ADD COLUMN tg_digest_on TEXT');
+  // Password reset through Telegram: a one-time code (stored hashed), when it expires and how many wrong tries it had.
+  if (!userColumns.includes('reset_hash')) {
+    db.exec('ALTER TABLE users ADD COLUMN reset_hash TEXT');
+    db.exec('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
+    db.exec('ALTER TABLE users ADD COLUMN reset_tries INTEGER NOT NULL DEFAULT 0');
+  }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).
   db.exec(`

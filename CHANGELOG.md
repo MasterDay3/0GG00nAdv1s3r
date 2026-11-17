@@ -14,6 +14,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: The whole interface, server messages, Telegram bot and Chrome extension are in Ukrainian; dates use the Ukrainian format. Fonts switched to IBM Plex Sans and Mono, which have Cyrillic.
 
 ### Security
+- `auth`: Change password (signs out every other device), log out on all devices, delete the account with everything in it.
+- `auth`: Forgotten password: a one-time 6-digit code goes to the linked Telegram chat (15 min, 5 tries, 3 codes per 15 min); the answer never reveals whether a username exists.
 - `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
 
 ### Changed

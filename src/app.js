@@ -1,5 +1,5 @@
 // node:crypto is needed for password hashing and session tokens; node:fs to serve the page files.
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parseIcs } from './ics.js';
 import { urgency, DAY } from './urgency.js';
@@ -19,6 +19,8 @@ const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
+const RESET_TTL = 15 * 60 * 1000;
+const RESET_TRIES = 5;
 const MINUTE = 60 * 1000;
 const BOT_WALL_MESSAGE = 'Ваш Moodle захищений перевіркою на бота, тож автоматична синхронізація не працює. '
   + 'У Moodle натисніть Експорт календаря → «Експортувати», завантажте файл .ics і імпортуйте його нижче.';
@@ -90,6 +92,13 @@ function sendJson(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+function newPassword(value) {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 200) {
+    throw new HttpError(400, 'Пароль має бути не коротшим за 8 символів');
+  }
+  return value;
+}
+
 function normalizeFeedUrl(value) {
   let url = text(value, 'Посилання на календар', { max: 2000, required: false });
   if (/^webcals?:\/\//i.test(url)) url = url.replace(/^webcals?:/i, 'https:');
@@ -100,9 +109,10 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   // Behind HTTPS the session cookie must never travel over plain HTTP.
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
   const routes = [];
-  const route = (method, pattern, fn, { auth = true, limit = MAX_JSON } = {}) => {
+  // withBody: a DELETE that also takes a JSON body (POST and PUT always do).
+  const route = (method, pattern, fn, { auth = true, limit = MAX_JSON, withBody = false } = {}) => {
     const re = new RegExp(`^${pattern.replace(/:(\w+)/g, '(?<$1>\\d+)')}$`);
-    routes.push({ method, re, fn, auth, limit });
+    routes.push({ method, re, fn, auth, limit, withBody });
   };
   const one = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -118,6 +128,11 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     // Wrong passwords for one account from anywhere: a slow, spread-out guess.
     accountFails: createLimiter({ limit: 30, windowMs: 60 * MINUTE, now }),
     registerIp: createLimiter({ limit: 20, windowMs: 60 * MINUTE, now }),
+    // Reset codes sent to one account, and reset requests from one address.
+    resetAccount: createLimiter({ limit: 3, windowMs: 15 * MINUTE, now }),
+    resetIp: createLimiter({ limit: 20, windowMs: 15 * MINUTE, now }),
+    // Wrong current passwords when changing the password or deleting the account.
+    confirmFails: createLimiter({ limit: 5, windowMs: 15 * MINUTE, now }),
   };
 
   function guard(res, ...checks) {
@@ -328,12 +343,10 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     guard(res, [limits.registerIp, ip]);
     const username = text(body.username, 'Логін', { max: 32 });
     if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Логін: 3–32 латинські літери, цифри або _');
-    if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 200) {
-      throw new HttpError(400, 'Пароль має бути не коротшим за 8 символів');
-    }
+    const password = newPassword(body.password);
     if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'Цей логін уже зайнятий');
     limits.registerIp.hit(ip);
-    const { lastInsertRowid } = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(body.password));
+    const { lastInsertRowid } = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(password));
     startSession(res, Number(lastInsertRowid));
     return { ok: true };
   }, { auth: false });
@@ -366,6 +379,84 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   }, { auth: false });
 
   route('GET', '/api/me', ({ user }) => me(user));
+
+  // ---------- routes: account ----------
+
+  // Checks the current password before a sensitive change; wrong guesses are limited like logins.
+  async function confirmPassword(user, password, res) {
+    const key = String(user.id);
+    guard(res, [limits.confirmFails, key]);
+    const valid = typeof password === 'string' && await verifyPassword(password.slice(0, 200), user.pass_hash);
+    if (!valid) {
+      limits.confirmFails.hit(key);
+      throw new HttpError(403, 'Неправильний поточний пароль');
+    }
+    limits.confirmFails.reset(key);
+  }
+
+  // A new password signs out every other device: whoever knew the old one loses access.
+  async function setPassword(userId, password, res) {
+    run('UPDATE users SET pass_hash = ?, reset_hash = NULL, reset_expires = NULL, reset_tries = 0 WHERE id = ?',
+      await hashPassword(password), userId);
+    run('DELETE FROM sessions WHERE user_id = ?', userId);
+    startSession(res, userId);
+  }
+
+  route('PUT', '/api/password', async ({ user, body, res }) => {
+    const password = newPassword(body.password);
+    await confirmPassword(user, body.current, res);
+    await setPassword(user.id, password, res);
+    return { ok: true };
+  });
+
+  route('POST', '/api/logout-all', ({ user, res }) => {
+    run('DELETE FROM sessions WHERE user_id = ?', user.id);
+    res.setHeader('set-cookie', `sid=; ${cookieFlags}; Max-Age=0`);
+    return { ok: true };
+  });
+
+  route('DELETE', '/api/account', async ({ user, body, res }) => {
+    if (body.confirm !== user.username) throw new HttpError(400, 'Щоб підтвердити, введіть свій логін');
+    await confirmPassword(user, body.password, res);
+    // Everything the user owns goes with the account (ON DELETE CASCADE); group deadlines they added stay for the group.
+    run('DELETE FROM users WHERE id = ?', user.id);
+    res.setHeader('set-cookie', `sid=; ${cookieFlags}; Max-Age=0`);
+    return { ok: true };
+  }, { withBody: true });
+
+  // Forgotten password: a 6-digit code goes to the Telegram chat linked to the account.
+  // The answer is the same whether or not the account exists, so it does not reveal usernames.
+  route('POST', '/api/password-reset', async ({ req, body, res }) => {
+    if (!telegram.enabled) throw new HttpError(409, 'Відновлення пароля працює через Telegram, а він на цьому сервері вимкнений');
+    const username = text(body.username, 'Логін', { max: 64 });
+    const ip = clientIp(req);
+    const account = username.toLowerCase();
+    guard(res, [limits.resetIp, ip], [limits.resetAccount, account]);
+    limits.resetIp.hit(ip);
+    limits.resetAccount.hit(account);
+    const user = one('SELECT * FROM users WHERE username = ?', username);
+    if (user?.tg_chat_id) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      run('UPDATE users SET reset_hash = ?, reset_expires = ?, reset_tries = 0 WHERE id = ?', sha256(code), now() + RESET_TTL, user.id);
+      await sendTo(user, `🔑 Код для відновлення пароля Dueboard: ${code}\nВін діє 15 хвилин. Якщо це не ви, просто проігноруйте повідомлення: пароль не зміниться.`);
+    }
+    return { ok: true };
+  }, { auth: false });
+
+  route('POST', '/api/password-reset/confirm', async ({ body, res }) => {
+    const username = text(body.username, 'Логін', { max: 64 });
+    const code = text(body.code, 'Код', { max: 12 }).replace(/\s/g, '');
+    const password = newPassword(body.password);
+    const user = one('SELECT * FROM users WHERE username = ?', username);
+    const usable = user?.reset_hash && user.reset_expires > now() && user.reset_tries < RESET_TRIES;
+    if (!usable) throw new HttpError(400, 'Код недійсний або застарів. Попросіть новий.');
+    if (!timingSafeEqual(Buffer.from(sha256(code)), Buffer.from(user.reset_hash))) {
+      run('UPDATE users SET reset_tries = reset_tries + 1 WHERE id = ?', user.id);
+      throw new HttpError(400, 'Неправильний код');
+    }
+    await setPassword(user.id, password, res);
+    return { ok: true };
+  }, { auth: false });
 
   route('PUT', '/api/settings', ({ user, body }) => {
     run('UPDATE users SET ics_url = ? WHERE id = ?', normalizeFeedUrl(body.icsUrl) || null, user.id);
@@ -733,7 +824,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       );
       const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
       if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Розширення не під’єднане' : 'Увійдіть у свій акаунт');
-      const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req, match.limit) : {};
+      const body = ['POST', 'PUT'].includes(req.method) || match.withBody ? await readJson(req, match.limit) : {};
       const result = await match.fn({ req, res, user, params, body });
       if (!res.headersSent) sendJson(res, 200, result);
     } catch (err) {
