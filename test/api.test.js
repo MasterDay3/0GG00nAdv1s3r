@@ -447,7 +447,9 @@ test('prep: exam on the board, diagnostic test, weak topics and plan, owner-only
 
   const testView = (await call('GET', `/api/exams/${exam.id}/test`)).data;
   assert.equal(testView.questions.length, 2);
-  assert.ok(testView.questions.every((q) => !('answerIndex' in q)));
+  // The answer comes along so the page can show right/wrong right away (the exam page shows answers too).
+  assert.deepEqual(testView.questions.map((q) => q.answerIndex), [1, 1]);
+  assert.ok(testView.questions.every((q) => q.topic && 'source' in q));
 
   const detail = (await call('POST', `/api/exams/${exam.id}/test`, { answers: { [q1.id]: 1, [q2.id]: 0 } })).data;
   assert.deepEqual(detail.result.topics.map((r) => [r.name, r.status]), [['Limits', 'strong'], ['Series', 'weak']]);

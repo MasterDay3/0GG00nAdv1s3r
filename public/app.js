@@ -667,11 +667,14 @@ function topicBlock(topic, reload) {
         h('span', { class: 'chip' }, plural(topic.questions.length, 'question')),
         h('span', { class: 'chip' }, plural(topic.problems.length, 'problem')),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/topics/${topic.id}`, 'topic and all its questions') }, 'Delete topic'))),
-    topic.questions.map((q) => h('div', { class: 'q' },
-      h('div', { class: 'head' }, h('span', { class: 'pre' }, q.prompt),
-        h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'question') }, 'Delete')),
-      h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))),
-      sourceLine(q))),
+    // Collapsed, so the answers are not seen before taking the test.
+    topic.questions.length ? h('details', { class: 'qlist' },
+      h('summary', {}, `Show questions and answers (${topic.questions.length})`),
+      topic.questions.map((q) => h('div', { class: 'q' },
+        h('div', { class: 'head' }, h('span', { class: 'pre' }, q.prompt),
+          h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'question') }, 'Delete')),
+        h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))),
+        sourceLine(q)))) : null,
     topic.problems.map((p) => h('div', { class: 'q' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, h('span', { class: 'kind' }, 'Practice problem'), p.text),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/problems/${p.id}`, 'problem') }, 'Delete')))),
@@ -845,36 +848,158 @@ async function showExam(id) {
   );
 }
 
+const LETTERS = 'ABCDEF';
+
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// A bar whose fill is set through the style property (inline style attributes are blocked by the CSP).
+function bar(fraction, cls = '') {
+  const fill = h('span', {});
+  fill.style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+  return h('div', { class: `bar ${cls}` }, fill);
+}
+
+// One option button; after answering, the right one turns green and a wrong pick red.
+function optionButton(q, i, chosen, onPick) {
+  const answered = chosen !== undefined;
+  let state = '';
+  if (answered && i === q.answerIndex) state = 'right';
+  else if (answered && i === chosen) state = 'wrong';
+  else if (answered) state = 'dim';
+  return h('button', {
+    type: 'button', class: `quiz-opt ${state}`, disabled: answered,
+    'aria-pressed': String(i === chosen),
+    onclick: () => onPick(i),
+  },
+  h('span', { class: 'letter' }, state === 'right' ? '✓' : state === 'wrong' ? '✗' : LETTERS[i]),
+  h('span', { class: 'text' }, q.options[i]));
+}
+
+function sourceHint(source) {
+  if (!source) return null;
+  const where = `${source.filename}${source.slide ? `, slide ${source.slide}` : ''}`;
+  return h('p', { class: 'quiz-hint' }, h('span', { class: 'tag' }, 'From your slides'), ` ${where}`, source.quote ? ` — “${source.quote}”` : '');
+}
+
+// The diagnostic test, one question at a time with instant feedback. Scored on the server at the end.
 async function showTest(exam) {
   const { questions } = await api('GET', `/api/exams/${exam.id}/test`);
-  const form = h('form', {
-    onsubmit: async (e) => {
+  const order = shuffled(questions);
+  const answers = {};
+  let index = 0;
+  const root = h('div', { class: 'quiz' });
+  const correctCount = () => order.filter((q) => answers[q.id] === q.answerIndex).length;
+  const answeredCount = () => Object.keys(answers).length;
+  const backToExam = () => { location.hash = `#/prep/${exam.id}`; render(); };
+
+  function pick(i) {
+    const q = order[index];
+    if (q.id in answers) return;
+    answers[q.id] = i;
+    draw();
+    root.querySelector('.quiz-next')?.focus();
+  }
+
+  function next() {
+    index++;
+    if (index < order.length) draw(); else finish();
+  }
+
+  function onKey(e) {
+    if (!document.body.contains(root)) { document.removeEventListener('keydown', onKey); return; }
+    const q = order[index];
+    if (!q || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!(q.id in answers)) {
+      let n = '123456'.indexOf(e.key);
+      if (n < 0 && e.key.length === 1) n = 'abcdef'.indexOf(e.key.toLowerCase());
+      if (n >= 0 && n < q.options.length) { e.preventDefault(); pick(n); }
+    } else if (e.key === 'Enter' || e.key === 'ArrowRight') {
       e.preventDefault();
-      const answers = {};
-      for (const q of questions) {
-        const picked = form.querySelector(`input[name="q${q.id}"]:checked`);
-        if (picked) answers[q.id] = Number(picked.value);
-      }
-      const unanswered = questions.length - Object.keys(answers).length;
-      if (unanswered && !confirm(`${unanswered} question(s) unanswered — they count as wrong. Submit anyway?`)) return;
-      if (await act(() => api('POST', `/api/exams/${exam.id}/test`, { answers }), 'Test scored')) render();
-    },
-  },
-  questions.map((q, n) => h('div', { class: 'test-q' },
-    h('fieldset', {},
-      h('legend', {}, `${n + 1}. ${q.topic}`),
-      h('p', { class: 'pre' }, q.prompt),
-      q.options.map((o, i) => h('label', { class: 'inline' }, h('input', { type: 'radio', name: `q${q.id}`, value: String(i) }), o))))),
-  h('div', { class: 'row' },
-    h('button', { type: 'submit', class: 'shrink' }, 'Submit answers'),
-    h('button', { type: 'button', class: 'secondary shrink', onclick: render }, 'Cancel')));
+      next();
+    }
+  }
+  document.addEventListener('keydown', onKey);
+
+  function draw() {
+    const q = order[index];
+    const chosen = answers[q.id];
+    const answered = chosen !== undefined;
+    const right = correctCount();
+    const last = index === order.length - 1;
+    root.replaceChildren(
+      h('div', { class: 'quiz-top' },
+        h('span', { class: 'num' }, `Question ${index + 1} of ${order.length}`),
+        h('span', { class: 'quiz-tally' },
+          h('span', { class: 'ok', title: 'Correct' }, `✓ ${right}`),
+          h('span', { class: 'bad', title: 'Wrong' }, `✗ ${answeredCount() - right}`))),
+      bar((index + (answered ? 1 : 0)) / order.length, 'quiz-progress'),
+      h('div', { class: 'quiz-card' },
+        h('span', { class: 'chip' }, q.topic),
+        h('p', { class: 'quiz-prompt pre' }, q.prompt),
+        h('div', { class: 'quiz-options', role: 'group', 'aria-label': 'Answer options' },
+          q.options.map((_, i) => optionButton(q, i, chosen, pick))),
+        answered
+          ? h('div', { class: `quiz-feedback ${chosen === q.answerIndex ? 'ok' : 'bad'}`, role: 'status' },
+            h('strong', {}, chosen === q.answerIndex ? 'Correct!' : 'Not quite.'),
+            chosen === q.answerIndex ? null : ` The answer is ${LETTERS[q.answerIndex]}: ${q.options[q.answerIndex]}`,
+            sourceHint(q.source))
+          : h('p', { class: 'muted small quiz-keys' }, 'Pick an answer, or press 1–', String(q.options.length), '.')),
+      h('div', { class: 'quiz-actions' },
+        h('button', {
+          type: 'button', class: 'link',
+          onclick: () => { if (!answeredCount() || confirm('Quit the test? Your answers so far are not saved.')) backToExam(); },
+        }, 'Quit'),
+        answered ? h('button', { type: 'button', class: 'quiz-next', onclick: next }, last ? 'See results' : 'Next question →') : null));
+  }
+
+  async function finish() {
+    const detail = await act(() => api('POST', `/api/exams/${exam.id}/test`, { answers }));
+    const right = correctCount();
+    const pct = order.length ? Math.round((right / order.length) * 100) : 0;
+    const mistakes = order.filter((q) => answers[q.id] !== q.answerIndex);
+    const topics = detail?.result?.topics || [];
+    root.replaceChildren(
+      h('div', { class: 'quiz-card quiz-summary' },
+        h('p', { class: 'muted' }, 'Your score'),
+        h('p', { class: 'score-big num' }, `${right} / ${order.length}`),
+        h('p', { class: 'muted' }, `${pct}% correct${detail ? '' : ' (not saved: try again)'}`),
+        bar(right / (order.length || 1), pct >= 70 ? 'good' : 'weak')),
+      topics.length ? h('section', { class: 'quiz-topics' },
+        h('h2', {}, 'By topic'),
+        topics.filter((t) => t.total).map((t) => h('div', { class: 'quiz-topic' },
+          h('div', { class: 'quiz-topic-head' },
+            h('span', {}, t.name),
+            h('span', { class: `chip ${t.status}` }, `${t.correct}/${t.total} · ${t.status}`)),
+          bar(t.correct / t.total, t.status === 'strong' ? 'good' : 'weak')))) : null,
+      mistakes.length ? h('section', { class: 'quiz-review' },
+        h('h2', {}, `Review your mistakes (${mistakes.length})`),
+        mistakes.map((q) => h('div', { class: 'quiz-card' },
+          h('span', { class: 'chip' }, q.topic),
+          h('p', { class: 'quiz-prompt pre' }, q.prompt),
+          h('div', { class: 'quiz-options' }, q.options.map((_, i) => optionButton(q, i, answers[q.id] ?? -1, () => {}))),
+          answers[q.id] === undefined ? h('p', { class: 'muted small' }, 'Not answered.') : null,
+          sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'No mistakes. Well done! 🎉'),
+      h('div', { class: 'quiz-actions' },
+        h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam) }, 'Retake'),
+        h('button', { type: 'button', onclick: backToExam }, 'See your study plan')));
+    window.scrollTo(0, 0);
+  }
 
   setView(
-    h('a', { class: 'back', href: `#/prep/${exam.id}`, onclick: (e) => { e.preventDefault(); render(); } }, exam.title),
+    h('a', { class: 'back', href: `#/prep/${exam.id}` }, exam.title),
     h('div', { class: 'page-head' },
       h('h1', {}, 'Diagnostic test'),
-      h('p', { class: 'muted' }, 'Answer honestly — the goal is to find what you do not know yet.')),
-    h('section', { class: 'panel' }, form));
+      h('p', { class: 'muted' }, 'Answer honestly: the goal is to find what you do not know yet.')),
+    root);
+  if (order.length) draw();
+  else root.replaceChildren(h('p', { class: 'muted' }, 'This exam has no questions yet.'));
   window.scrollTo(0, 0);
 }
 

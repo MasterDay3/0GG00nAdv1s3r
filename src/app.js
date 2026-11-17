@@ -575,9 +575,14 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('GET', '/api/exams/:id/test', ({ user, params }) => {
     ownExam(user, params.id);
     const topics = new Map(all('SELECT id, name FROM topics WHERE exam_id = ?', params.id).map((t) => [t.id, t.name]));
+    const sources = new Map(all(
+      `SELECT s.* FROM question_sources s JOIN questions q ON q.id = s.question_id
+       JOIN topics t ON t.id = q.topic_id WHERE t.exam_id = ?`, params.id,
+    ).map((s) => [s.question_id, { filename: s.filename, slide: s.slide, quote: s.quote }]));
+    // Practice on the student's own questions, so the answer comes along: the page shows right/wrong at once.
     return {
-      questions: examQuestions(params.id).map(({ id, topicId, prompt, options }) => ({
-        id, topic: topics.get(topicId), prompt, options,
+      questions: examQuestions(params.id).map(({ id, topicId, prompt, options, answerIndex }) => ({
+        id, topicId, topic: topics.get(topicId), prompt, options, answerIndex, source: sources.get(id) || null,
       })),
     };
   });
