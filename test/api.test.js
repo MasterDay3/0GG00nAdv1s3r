@@ -871,3 +871,27 @@ test('telegram: the morning digest says what to study today for a coming exam', 
   assert.match(sent[0].text, /📚 Calculus .*тренуйте слабкі теми: Series/);
   assert.doesNotMatch(sent[0].text, /No topics yet/, 'an exam without topics has no plan to follow');
 });
+
+test('account: export downloads all your data as JSON, without secrets', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await signedUp(base, 'anna');
+  const { key } = (await call('POST', '/api/deadlines', { title: 'Essay', course: 'Ethics', dueAt: NOW + DAY })).data;
+  await call('PUT', '/api/notes', { key, text: 'Use 3 sources' });
+  const { id: examId } = (await call('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * DAY })).data;
+  const { id: topic } = (await call('POST', `/api/exams/${examId}/topics`, { name: 'Limits' })).data;
+  await call('POST', `/api/topics/${topic}/questions`, { prompt: '1+1?', options: ['1', '2'], answerIndex: 1 });
+  await call('POST', '/api/extension/key', {});
+
+  const res = await call('GET', '/api/export');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-disposition'), /^attachment; filename="dueboard-mykola-/);
+  const data = res.data;
+  assert.equal(data.account.username, 'mykola');
+  assert.deepEqual(data.deadlines.map((d) => [d.title, d.note]), [['Essay', 'Use 3 sources']]);
+  assert.equal(data.exams[0].topics[0].questions[0].answer, '2');
+  const text = JSON.stringify(data);
+  assert.doesNotMatch(text, /pass_hash|ext_key|anna/);
+  assert.equal((await client(base)('GET', '/api/export')).status, 401);
+});

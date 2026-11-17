@@ -853,6 +853,9 @@ function accountCard() {
   h('button', { type: 'submit', class: 'danger' }, 'Видалити акаунт'));
 
   return [
+    h('p', { class: 'small' },
+      h('a', { href: '/api/export', download: '' }, 'Завантажити всі мої дані'),
+      h('span', { class: 'muted' }, ' — дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
     h('details', {}, h('summary', {}, 'Змінити пароль'), passwordForm),
     h('details', {},
       h('summary', {}, 'Вийти на всіх пристроях'),

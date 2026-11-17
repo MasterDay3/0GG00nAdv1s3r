@@ -460,6 +460,39 @@ export function createApp({
     return { ok: true };
   });
 
+  // Everything the account holds, as one JSON file (uploaded files are listed, not embedded: they download on their own).
+  route('GET', '/api/export', ({ user, res }) => {
+    const exams = all('SELECT * FROM exams WHERE user_id = ? ORDER BY exam_at', user.id).map((exam) => {
+      const detail = withAi(examDetail(exam));
+      return {
+        title: detail.title, course: detail.course, examAt: new Date(detail.examAt).toISOString(),
+        topics: detail.topics.map((t) => ({
+          name: t.name,
+          questions: t.questions.map((q) => ({ prompt: q.prompt, options: q.options, answer: q.options[q.answerIndex], source: q.source })),
+          problems: t.problems.map((p) => p.text),
+        })),
+        files: detail.materials.map((m) => ({ name: m.filename, bytes: m.size, uploadedAt: new Date(m.createdAt).toISOString() })),
+        testAttempts: detail.history.map((a) => ({ takenAt: new Date(a.takenAt).toISOString(), correct: a.correct, total: a.total, topics: a.topics })),
+      };
+    });
+    const data = {
+      exportedAt: new Date(now()).toISOString(),
+      account: me(user),
+      deadlines: boardItems(user).filter((item) => item.source !== 'exam').map((item) => ({
+        title: item.title, course: item.course, dueAt: new Date(item.dueAt).toISOString(), source: item.source,
+        url: item.url, note: item.note, done: item.done,
+      })),
+      exams,
+    };
+    const day = new Date(now()).toISOString().slice(0, 10);
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="dueboard-${user.username}-${day}.json"`,
+      'cache-control': 'no-store',
+    });
+    res.end(JSON.stringify(data, null, 2));
+  });
+
   route('POST', '/api/logout-all', ({ user, res }) => {
     run('DELETE FROM sessions WHERE user_id = ?', user.id);
     res.setHeader('set-cookie', `sid=; ${cookieFlags}; Max-Age=0`);
