@@ -827,3 +827,26 @@ test('moodle: a failing sync is shown on the site and announced in Telegram once
   await app.syncAll();
   assert.equal((await call('GET', '/api/me')).data.syncError, null);
 });
+
+test('telegram: reminder times are chosen in settings, a 3-hour one can be added', async (t) => {
+  let clock = NOW;
+  const { app, base, sent, close } = await start({ now: () => clock });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const { code } = (await call('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 5, type: 'private' }, text: `/start ${code}` } });
+  assert.deepEqual((await call('GET', '/api/me')).data.telegram.reminders, ['3d', '1d']);
+  assert.equal((await call('PUT', '/api/telegram/reminders', { kinds: ['5m'] })).status, 400);
+  assert.deepEqual((await call('PUT', '/api/telegram/reminders', { kinds: ['1d', '3h'] })).data.reminders, ['1d', '3h']);
+
+  await call('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 2 * DAY });
+  sent.length = 0;
+  await app.runReminders();
+  assert.equal(sent.length, 0, 'no 3-day reminder: it was turned off');
+  clock = NOW + DAY + HOUR;
+  await app.runReminders();
+  clock = NOW + 2 * DAY - 2 * HOUR;
+  await app.runReminders();
+  await app.runReminders();
+  assert.deepEqual(sent.map((m) => /менш ніж за (добу|3 години)/.exec(m.text)[1]), ['добу', '3 години']);
+});

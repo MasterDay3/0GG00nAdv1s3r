@@ -114,6 +114,8 @@ export function openDb(path = ':memory:') {
   if (!userColumns.includes('cal_token_hash')) db.exec('ALTER TABLE users ADD COLUMN cal_token_hash TEXT');
   // Why the last Moodle sync failed (NULL after a good one), so the student sees it instead of a silently stale board.
   if (!userColumns.includes('sync_error')) db.exec('ALTER TABLE users ADD COLUMN sync_error TEXT');
+  // Which Telegram reminders the user wants, e.g. "3d,1d,3h" (NULL: the default 3 days and 1 day).
+  if (!userColumns.includes('tg_remind')) db.exec('ALTER TABLE users ADD COLUMN tg_remind TEXT');
   // Which questions a diagnostic attempt got wrong (JSON array of ids), for "practise your mistakes".
   const attemptColumns = db.prepare('PRAGMA table_info(attempts)').all().map((c) => c.name);
   if (!attemptColumns.includes('wrong')) db.exec("ALTER TABLE attempts ADD COLUMN wrong TEXT NOT NULL DEFAULT '[]'");

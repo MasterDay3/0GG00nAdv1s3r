@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { urgency, HOUR, DAY } from '../src/urgency.js';
-import { dueReminders } from '../src/reminders.js';
+import { dueReminders, parseReminders, supersededBy } from '../src/reminders.js';
 import { buildPlan, addDays, daysBetween } from '../src/plan.js';
 import { scoreDiagnostic } from '../src/diagnostic.js';
 import { formatDue, localParts, digestText } from '../src/bot.js';
@@ -110,4 +110,21 @@ test('bot: digest covers only the next 7 days', () => {
   assert.match(digestText(items, NOW), /Soon/);
   assert.doesNotMatch(digestText(items, NOW), /Later/);
   assert.equal(digestText([items[1]], NOW), null);
+});
+
+test('reminders: the user picks the times; only the tightest window fires', () => {
+  const items = [
+    { key: 'd1', dueAt: NOW + 2 * HOUR },
+    { key: 'd2', dueAt: NOW + 20 * HOUR },
+    { key: 'd3', dueAt: NOW + 2 * DAY },
+  ];
+  const kinds = (list) => dueReminders(items, new Set(), NOW, list).map((r) => `${r.item.key}:${r.kind}`);
+  assert.deepEqual(kinds(['3d', '1d', '3h']), ['d1:3h', 'd2:1d', 'd3:3d']);
+  assert.deepEqual(kinds(['3h']), ['d1:3h']);
+  assert.deepEqual(kinds(['3d']), ['d1:3d', 'd2:3d', 'd3:3d']);
+  assert.deepEqual(kinds([]), []);
+  assert.deepEqual(parseReminders(null), ['3d', '1d']);
+  assert.deepEqual(parseReminders(''), []);
+  assert.deepEqual(parseReminders('3h,bogus,1d'), ['3h', '1d']);
+  assert.deepEqual(supersededBy('3h'), ['1d', '3d']);
 });

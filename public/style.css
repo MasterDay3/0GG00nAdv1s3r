@@ -420,3 +420,7 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .panel.warning { margin-bottom: var(--space-lg); border-color: var(--color-error); background: var(--color-paper-2); }
 .panel.warning strong { color: var(--color-error); }
 .sync-error { color: var(--color-error); }
+
+/* Telegram reminder times */
+.reminder-choice { border: 0; margin: var(--space-sm) 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); }
+.reminder-choice legend { padding: 0; margin-bottom: var(--space-2xs); width: 100%; }

@@ -3,7 +3,9 @@ import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from 'nod
 import { readFile } from 'node:fs/promises';
 import { parseIcs } from './ics.js';
 import { urgency, DAY } from './urgency.js';
-import { dueReminders, reminderText } from './reminders.js';
+import {
+  dueReminders, reminderText, parseReminders, supersededBy, REMINDER_WINDOWS,
+} from './reminders.js';
 import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
@@ -192,7 +194,9 @@ export function createApp({
       icsUrl: user.ics_url || '',
       lastSyncAt: user.last_sync_at,
       syncError: user.ics_url ? user.sync_error || null : null,
-      telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id), digest: Boolean(user.tg_digest) },
+      telegram: {
+        enabled: telegram.enabled, linked: Boolean(user.tg_chat_id), digest: Boolean(user.tg_digest), reminders: parseReminders(user.tg_remind),
+      },
       extension: { connected: Boolean(user.ext_key_hash) },
       calendarFeed: Boolean(user.cal_token_hash),
     };
@@ -682,6 +686,13 @@ export function createApp({
     return { code, botName: await telegram.botName() };
   });
 
+  route('PUT', '/api/telegram/reminders', ({ user, body }) => {
+    const kinds = body.kinds;
+    if (!Array.isArray(kinds) || kinds.some((k) => !(k in REMINDER_WINDOWS))) throw new HttpError(400, 'Невідомий час нагадування');
+    run('UPDATE users SET tg_remind = ? WHERE id = ?', [...new Set(kinds)].join(','), user.id);
+    return { reminders: parseReminders(one('SELECT tg_remind FROM users WHERE id = ?', user.id).tg_remind) };
+  });
+
   route('DELETE', '/api/telegram', ({ user }) => {
     run('UPDATE users SET tg_chat_id = NULL, tg_link_code = NULL WHERE id = ?', user.id);
     return { ok: true };
@@ -1095,12 +1106,14 @@ export function createApp({
       const sent = new Set(
         all('SELECT item_key, kind FROM reminders_sent WHERE user_id = ?', user.id).map((r) => `${r.item_key}:${r.kind}`),
       );
-      for (const { item, kind } of dueReminders(openItems(user), sent, t)) {
+      for (const { item, kind } of dueReminders(openItems(user), sent, t, parseReminders(user.tg_remind))) {
         const button = item.key.startsWith('d') ? { doneKey: item.key } : {};
         if (!(await sendTo(user, reminderText(item, kind), button))) break;
         run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
-        // The 1-day reminder makes the 3-day one pointless.
-        if (kind === '1d') run(`INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, '3d')`, user.id, item.key);
+        // A later reminder makes the earlier ones pointless (the 1-day one replaces a missed 3-day one).
+        for (const earlier of supersededBy(kind)) {
+          run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, earlier);
+        }
       }
     }
   }

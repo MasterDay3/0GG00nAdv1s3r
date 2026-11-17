@@ -717,7 +717,8 @@ async function showSettings() {
       tgBox.replaceChildren(h('p', { class: 'muted' }, 'Telegram-бот на цьому сервері вимкнений. Щоб увімкнути нагадування, запустіть сервер із TELEGRAM_BOT_TOKEN.'));
     } else if (me.telegram.linked) {
       tgBox.replaceChildren(
-        h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Нагадування приходять за 3 дні й за 1 день до кожного дедлайну, а зранку — дайджест, якщо цього тижня щось треба здати.'),
+        h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Бот нагадує про кожен дедлайн, а зранку надсилає дайджест, якщо цього тижня щось треба здати.'),
+        reminderChoice(),
         h('p', { class: 'muted' }, 'У боті: /deadlines — список дедлайнів, /digest — увімкнути чи вимкнути дайджест, /stop — відв’язати чат.'),
         h('button', {
           type: 'button', class: 'secondary',
@@ -758,6 +759,21 @@ async function showSettings() {
 }
 
 // The board as a calendar feed: the secret link is shown once, right after it is made.
+// When the Telegram reminders come; saved on every change.
+function reminderChoice() {
+  const options = [['3d', 'За 3 дні'], ['1d', 'За 1 день'], ['3h', 'За 3 години']];
+  const boxes = options.map(([kind, label]) => h('label', { class: 'inline' },
+    h('input', {
+      type: 'checkbox', value: kind, checked: me.telegram.reminders.includes(kind),
+      onchange: async () => {
+        const kinds = boxes.filter((b) => b.querySelector('input').checked).map((b) => b.querySelector('input').value);
+        const r = await act(() => api('PUT', '/api/telegram/reminders', { kinds }), kinds.length ? 'Збережено' : 'Нагадування вимкнено, дайджест лишається');
+        if (r) me.telegram.reminders = r.reminders;
+      },
+    }), label));
+  return h('fieldset', { class: 'reminder-choice' }, h('legend', { class: 'small muted' }, 'Коли нагадувати'), boxes);
+}
+
 function calendarCard() {
   const box = h('div', {});
   const intro = h('p', { class: 'muted small' }, 'Дедлайни й екзамени з’являться у вашому календарі на телефоні й оновлюватимуться самі. Виконані зникають. Google оновлює підписані календарі раз на кілька годин.');
