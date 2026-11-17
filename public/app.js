@@ -670,12 +670,52 @@ function topicBlock(topic, reload) {
     topic.questions.map((q) => h('div', { class: 'q' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, q.prompt),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'question') }, 'Delete')),
-      h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))))),
+      h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))),
+      sourceLine(q))),
     topic.problems.map((p) => h('div', { class: 'q' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, h('span', { class: 'kind' }, 'Practice problem'), p.text),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/problems/${p.id}`, 'problem') }, 'Delete')))),
     questionForm(topic, reload),
     problemForm(topic, reload));
+}
+
+// Where an AI-generated question comes from: the file, the slide and a short quote.
+function sourceLine(q) {
+  if (!q.source) return null;
+  const { materialId, filename, slide, quote } = q.source;
+  const where = `${filename}${slide ? `, slide ${slide}` : ''}`;
+  return h('p', { class: 'source muted small' },
+    h('span', { class: 'tag' }, 'AI'), ' From ',
+    materialId ? h('a', { href: `/api/materials/${materialId}` }, where) : where,
+    quote ? ` — “${quote}”` : '');
+}
+
+function aiBlock(exam, reload) {
+  const readable = exam.materials.filter((m) => /\.(pdf|pptx|docx|txt|md)$/i.test(m.filename));
+  let hint = `Claude reads your uploaded slides and writes 3–5 practice questions per topic, each marked with the slide it comes from. Only practice questions that apply the ideas to new cases, so they can't be used on graded Moodle quizzes.`;
+  if (!exam.ai.enabled) hint = 'AI questions are not set up on this server yet.';
+  else if (!exam.topics.length) hint = 'Add the exam topics below first.';
+  else if (!readable.length) hint = 'Upload your lecture slides below first (PDF or PPTX).';
+  const button = h('button', {
+    type: 'button', class: 'secondary',
+    disabled: !exam.ai.enabled || !exam.topics.length || !readable.length,
+    onclick: async () => {
+      button.disabled = true;
+      button.textContent = 'Generating… (up to a minute)';
+      const r = await act(() => api('POST', `/api/exams/${exam.id}/generate`, {}));
+      if (r) {
+        const skipped = r.skipped.map((s) => ` Skipped ${s.filename}: ${s.reason}.`).join('');
+        toast((r.added ? `Added ${plural(r.added, 'question')} from your slides.` : 'No new questions: the slides do not cover these topics.') + skipped, !r.added);
+        reload();
+      } else {
+        button.disabled = false;
+        button.textContent = 'Generate questions';
+      }
+    },
+  }, 'Generate questions');
+  return h('section', { class: 'panel' },
+    h('div', { class: 'head' }, h('h2', {}, 'Questions from your slides'), button),
+    h('p', { class: 'muted small' }, hint));
 }
 
 function readAsBase64(file) {
@@ -796,6 +836,7 @@ async function showExam(id) {
         : 'Add topics and a few questions below, then take the test.')),
     resultBlock(exam),
     planBlock(exam),
+    aiBlock(exam, reload),
     h('section', { class: 'panel' },
       h('h2', {}, 'Topics & questions'),
       exam.topics.map((t) => topicBlock(t, reload)),

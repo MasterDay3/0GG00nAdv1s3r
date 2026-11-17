@@ -54,6 +54,7 @@ HOST=127.0.0.1
 DB_PATH=$DATA_DIR/dueboard.db
 COOKIE_SECURE=0
 TELEGRAM_BOT_TOKEN=
+ANTHROPIC_API_KEY=
 ENV
   chmod 640 "$ENV_FILE" && chgrp dueboard "$ENV_FILE"
 fi

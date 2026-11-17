@@ -7,6 +7,7 @@ import { dueReminders, reminderText } from './reminders.js';
 import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
+import { createAi, MODEL } from './ai.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -16,6 +17,7 @@ const MAX_FILE = 10 * 1024 * 1024;
 const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
 const SESSION_TTL = 30 * DAY;
+const AI_RUNS_PER_DAY = 10;
 const BOT_WALL_MESSAGE = 'Your Moodle is behind a bot check that blocks automatic sync. '
   + 'In Moodle use Export calendar → "Export" to download the .ics file, then import it below.';
 
@@ -92,7 +94,7 @@ function normalizeFeedUrl(value) {
   return link(url, 'Calendar link');
 }
 
-export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false }) {
+export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false, ai = createAi() }) {
   // Behind HTTPS the session cookie must never travel over plain HTTP.
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
   const routes = [];
@@ -469,7 +471,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     return { id: Number(lastInsertRowid) };
   });
 
-  route('GET', '/api/exams/:id', ({ user, params }) => examDetail(ownExam(user, params.id)));
+  route('GET', '/api/exams/:id', ({ user, params }) => withAi(examDetail(ownExam(user, params.id))));
 
   route('DELETE', '/api/exams/:id', ({ user, params }) => {
     ownExam(user, params.id);
@@ -589,6 +591,68 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const result = scoreDiagnostic(topics, questions, answers);
     run('INSERT INTO attempts (exam_id, created_at, result) VALUES (?, ?, ?)', exam.id, now(), JSON.stringify(result));
     return examDetail(exam);
+  });
+
+  // ---------- routes: AI questions from slides ----------
+
+  // Adds the slide each AI-generated question comes from, and whether AI generation is available.
+  function withAi(detail) {
+    const sources = new Map(all(
+      `SELECT s.* FROM question_sources s JOIN questions q ON q.id = s.question_id
+       JOIN topics t ON t.id = q.topic_id WHERE t.exam_id = ?`, detail.id,
+    ).map((s) => [s.question_id, { materialId: s.material_id, filename: s.filename, slide: s.slide, quote: s.quote }]));
+    for (const topic of detail.topics) {
+      for (const q of topic.questions) q.source = sources.get(q.id) || null;
+    }
+    return { ...detail, ai: { enabled: ai.enabled, model: MODEL } };
+  }
+
+  const generating = new Set();
+
+  route('POST', '/api/exams/:id/generate', async ({ user, params, body }) => {
+    const exam = ownExam(user, params.id);
+    let topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
+    if (Array.isArray(body.topicIds)) topics = topics.filter((t) => body.topicIds.includes(t.id));
+    if (!topics.length) throw new HttpError(400, 'Add the exam topics first');
+    const materials = all('SELECT id, filename, data FROM materials WHERE exam_id = ? ORDER BY id', exam.id);
+    if (!materials.length) throw new HttpError(400, 'Upload your lecture slides first');
+    if (generating.has(user.id)) throw new HttpError(409, 'Questions are already being generated. Wait for them to finish.');
+    const { runs } = one('SELECT COUNT(*) AS runs FROM ai_runs WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
+    if (runs >= AI_RUNS_PER_DAY) throw new HttpError(429, `You can generate questions ${AI_RUNS_PER_DAY} times a day. Try again tomorrow.`);
+
+    const existing = examQuestions(exam.id);
+    generating.add(user.id);
+    let result;
+    try {
+      result = await ai.generateQuestions({
+        examTitle: exam.title,
+        topics: topics.map((t) => ({ ...t, existing: existing.filter((q) => q.topicId === t.id).map((q) => q.prompt) })),
+        materials,
+      });
+    } finally {
+      generating.delete(user.id);
+    }
+    run('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)', user.id, now());
+
+    const filenames = new Map(materials.map((m) => [m.id, m.filename]));
+    db.exec('BEGIN');
+    try {
+      for (const q of result.questions) {
+        const { lastInsertRowid } = run(
+          'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
+          q.topicId, q.prompt, JSON.stringify(q.options), q.answerIndex,
+        );
+        run(
+          'INSERT INTO question_sources (question_id, material_id, filename, slide, quote) VALUES (?, ?, ?, ?, ?)',
+          lastInsertRowid, q.materialId, filenames.get(q.materialId), q.slide, q.quote,
+        );
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    return { ...withAi(examDetail(exam)), added: result.questions.length, skipped: result.skipped };
   });
 
   // ---------- request handling ----------

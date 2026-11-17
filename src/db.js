@@ -105,5 +105,19 @@ export function openDb(path = ':memory:') {
   // Kyiv date ('YYYY-MM-DD') of the last morning digest, so it goes out once a day.
   if (!userColumns.includes('tg_digest_on')) db.exec('ALTER TABLE users ADD COLUMN tg_digest_on TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
+  // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).
+  db.exec(`
+CREATE TABLE IF NOT EXISTS question_sources (
+  question_id INTEGER PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+  material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+  filename TEXT NOT NULL,
+  slide INTEGER NOT NULL,
+  quote TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ai_runs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL
+);`);
   return db;
 }
