@@ -105,11 +105,13 @@ export function openDb(path = ':memory:') {
   // Kyiv date ('YYYY-MM-DD') of the last morning digest, so it goes out once a day.
   if (!userColumns.includes('tg_digest_on')) db.exec('ALTER TABLE users ADD COLUMN tg_digest_on TEXT');
   // Password reset through Telegram: a one-time code (stored hashed), when it expires and how many wrong tries it had.
-  if (!userColumns.includes('reset_hash')) {
-    db.exec('ALTER TABLE users ADD COLUMN reset_hash TEXT');
-    db.exec('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
-    db.exec('ALTER TABLE users ADD COLUMN reset_tries INTEGER NOT NULL DEFAULT 0');
-  }
+  // Each column on its own, so a start that died halfway through still gets the rest.
+  if (!userColumns.includes('reset_hash')) db.exec('ALTER TABLE users ADD COLUMN reset_hash TEXT');
+  if (!userColumns.includes('reset_expires')) db.exec('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
+  if (!userColumns.includes('reset_tries')) db.exec('ALTER TABLE users ADD COLUMN reset_tries INTEGER NOT NULL DEFAULT 0');
+  // Wrong reset codes per account across codes, in a day (a new code must not reset the count).
+  if (!userColumns.includes('reset_fails')) db.exec('ALTER TABLE users ADD COLUMN reset_fails INTEGER NOT NULL DEFAULT 0');
+  if (!userColumns.includes('reset_fails_at')) db.exec('ALTER TABLE users ADD COLUMN reset_fails_at INTEGER');
   // Secret link to the board as a calendar feed (stored hashed, like the extension key).
   if (!userColumns.includes('cal_token_hash')) db.exec('ALTER TABLE users ADD COLUMN cal_token_hash TEXT');
   // Why the last Moodle sync failed (NULL after a good one), so the student sees it instead of a silently stale board.

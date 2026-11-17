@@ -11,6 +11,12 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 ## [Unreleased]
 
 ### Security
+- `api`: A crafted .pptx can no longer freeze the server for hours (slide text is read in linear time).
+- `auth`: A new password revokes the extension key and any pending Telegram link code; "log out everywhere" also turns off the calendar link and unlinks Telegram.
+- `auth`: Wrong password-reset codes add up across codes (10 a day per account), so asking for new codes no longer buys new guesses.
+- `api`: Links with line breaks are refused (they could inject lines into group members' calendar feeds); dates must lie between 2000 and 2100 (a date like 1e300 broke digests, exports and feeds for others).
+- `api`: The SSRF guard also reads IPv4 hidden in IPv6 written in hex (NAT64, 6to4, mapped, compatible) and blocks Teredo.
+- `api`: Group codes are 12 characters and wrong codes are limited to 10 an hour; at most 4 big uploads are read at once; failed AI runs count toward the daily limit.
 - `api`: The Moodle calendar link can no longer make the server call internal addresses (localhost, the local network, the cloud metadata service): every address is checked when connecting, on each redirect too, and the download is capped at 5 MB. Manual syncs are limited to 10 per 10 minutes.
 - `infra`: HSTS when served over HTTPS; `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers.
 - `auth`: Change password (signs out every other device), log out on all devices, delete the account with everything in it.
@@ -67,6 +73,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `api`: Reminders come again when Moodle moves a deadline; an empty Moodle feed no longer deletes deadlines with their notes; a background job that takes longer than a minute no longer starts a second copy that sends everything twice; one user's error no longer stops reminders and digests for everyone after them; Telegram messages are cut to Telegram's limit instead of failing every minute; plan days follow Kyiv time whatever the server's time zone; a group deadline whose author deleted the account can be removed by any member; two sign-ups with one name at once give 409, not 500; database migrations add each column on its own.
 - `ui`: Log out offline no longer pretends to sign out while the session stays valid; another account's saved offline data is cleared on log in; coming back online no longer wipes a running test or a half-typed form; a slow screen can no longer draw over a newer one; a double Enter or double click no longer creates two deadlines or saves a test twice; focus moves to the new screen's heading and the page is no longer re-read by screen readers on every change; reminder checkboxes show the real state after a failed save; a failed extension connect no longer shows Connected.
 - `infra`: The extension no longer shows an error badge for the hourly background sync when a Moodle visit synced within the day; the popup is fully Ukrainian.
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).

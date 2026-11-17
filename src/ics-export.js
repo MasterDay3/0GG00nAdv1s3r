@@ -55,7 +55,7 @@ export function buildCalendar(items, now, host = 'dueboard') {
       `DTEND:${stamp(item.dueAt)}`,
       `SUMMARY:${escapeText(summary)}`,
       description ? `DESCRIPTION:${escapeText(description)}` : null,
-      /^https?:\/\//i.test(item.url || '') ? `URL:${item.url}` : null,
+      /^https?:\/\//i.test(item.url || '') ? `URL:${item.url.replace(/[\r\n]/g, '')}` : null,
       'TRANSP:TRANSPARENT',
       'END:VEVENT',
     );

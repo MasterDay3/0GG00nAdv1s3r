@@ -21,10 +21,12 @@ const MAX_JSON = 64 * 1024;
 const MAX_FILE = 10 * 1024 * 1024;
 const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
+const MAX_BIG_BODIES = 4;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
 const RESET_TTL = 15 * 60 * 1000;
 const RESET_TRIES = 5;
+const RESET_FAILS_PER_DAY = 10;
 const MINUTE = 60 * 1000;
 const BOT_WALL_MESSAGE = 'Ваш Moodle захищений перевіркою на бота, тож автоматична синхронізація не працює. '
   + 'У Moodle натисніть Експорт календаря → «Експортувати», завантажте файл .ics і імпортуйте його нижче.';
@@ -150,6 +152,7 @@ export function createApp({
     confirmFails: createLimiter({ limit: 5, windowMs: 15 * MINUTE, now }),
     // Manual Moodle syncs: each one makes the server download a link.
     sync: createLimiter({ limit: 10, windowMs: 10 * MINUTE, now }),
+    groupJoin: createLimiter({ limit: 10, windowMs: 60 * MINUTE, now }),
   };
 
   function guard(res, ...checks) {
@@ -235,7 +238,8 @@ export function createApp({
     ).map((d) => ({
       key: `d${d.id}`, id: d.id, source: d.source, course: d.course, title: d.title, url: d.url,
       dueAt: d.due_at, note: d.note || '', done: d.done_at != null,
-      canDelete: d.source !== 'moodle' && d.created_by === user.id,
+      canDelete: d.source !== 'moodle' && (d.created_by === user.id || (d.created_by == null && d.group_id != null)),
+      canEdit: d.source !== 'moodle' && d.created_by === user.id,
     }));
     const exams = all(
       `SELECT e.*, n.text AS note FROM exams e
@@ -260,15 +264,21 @@ export function createApp({
          course = excluded.course, title = excluded.title, due_at = excluded.due_at,
          url = CASE WHEN excluded.url = '' THEN deadlines.url ELSE excluded.url END`,
     );
+    const existing = db.prepare('SELECT id, due_at FROM deadlines WHERE owner_user_id = ? AND uid = ?');
     db.exec('BEGIN');
     try {
       for (const ev of events) {
         let url = ev.url;
         if (!url && origin) url = `${origin}/calendar/view.php?view=day&time=${Math.floor(ev.dueAt / 1000)}`;
-        upsert.run(user.id, user.id, ev.uid.slice(0, 500), ev.course.slice(0, 200), ev.title.slice(0, 500), url.slice(0, 2000), ev.dueAt);
+        const uid = ev.uid.slice(0, 500);
+        const before = existing.get(user.id, uid);
+        upsert.run(user.id, user.id, uid, ev.course.slice(0, 200), ev.title.slice(0, 500), url.slice(0, 2000), ev.dueAt);
+        // The teacher moved the date: its reminders come again for the new one.
+        if (before && before.due_at !== ev.dueAt) run('DELETE FROM reminders_sent WHERE item_key = ?', `d${before.id}`);
       }
       // A future Moodle deadline that disappeared from the feed was removed or moved in Moodle.
-      if (origin) {
+      // An empty feed is more likely a glitch than every assignment gone: then nothing (and no note) is deleted.
+      if (origin && events.length) {
         const uids = new Set(events.map((e) => e.uid.slice(0, 500)));
         const stale = all(`SELECT id, uid FROM deadlines WHERE owner_user_id = ? AND source = 'moodle' AND due_at > ?`, user.id, t)
           .filter((d) => !uids.has(d.uid));
@@ -397,8 +407,15 @@ export function createApp({
     const password = newPassword(body.password);
     if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'Цей логін уже зайнятий');
     limits.registerIp.hit(ip);
-    const { lastInsertRowid } = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(password));
-    startSession(res, Number(lastInsertRowid));
+    let created;
+    try {
+      created = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(password));
+    } catch (err) {
+      // Two sign-ups with one name at the same moment: the second loses at the unique index.
+      if (/UNIQUE/i.test(err.message)) throw new HttpError(409, 'Цей логін уже зайнятий');
+      throw err;
+    }
+    startSession(res, Number(created.lastInsertRowid));
     return { ok: true };
   }, { auth: false });
 
@@ -445,10 +462,12 @@ export function createApp({
     limits.confirmFails.reset(key);
   }
 
-  // A new password signs out every other device: whoever knew the old one loses access.
+  // A new password signs out every other device: whoever knew the old one loses access, including through an
+  // extension key or a Telegram link code they made while signed in. (The extension connects again in Settings.)
   async function setPassword(userId, password, res) {
-    run('UPDATE users SET pass_hash = ?, reset_hash = NULL, reset_expires = NULL, reset_tries = 0 WHERE id = ?',
-      await hashPassword(password), userId);
+    run(`UPDATE users SET pass_hash = ?, reset_hash = NULL, reset_expires = NULL, reset_tries = 0, reset_fails = 0,
+         ext_key_hash = NULL, tg_link_code = NULL WHERE id = ?`,
+    await hashPassword(password), userId);
     run('DELETE FROM sessions WHERE user_id = ?', userId);
     startSession(res, userId);
   }
@@ -514,8 +533,10 @@ export function createApp({
     return data;
   });
 
+  // "Someone had access": every way in goes, the extension key, the calendar link and the Telegram chat included.
   route('POST', '/api/logout-all', ({ user, res }) => {
     run('DELETE FROM sessions WHERE user_id = ?', user.id);
+    run('UPDATE users SET ext_key_hash = NULL, cal_token_hash = NULL, tg_chat_id = NULL, tg_link_code = NULL WHERE id = ?', user.id);
     res.setHeader('set-cookie', `sid=; ${cookieFlags}; Max-Age=0`);
     return { ok: true };
   });
@@ -553,10 +574,16 @@ export function createApp({
     const code = text(body.code, 'Код', { max: 12 }).replace(/\s/g, '');
     const password = newPassword(body.password);
     const user = one('SELECT * FROM users WHERE username = ?', username);
-    const usable = user?.reset_hash && user.reset_expires > now() && user.reset_tries < RESET_TRIES;
+    const t = now();
+    // Wrong codes add up across codes for a day, so asking for new codes does not buy new guesses.
+    const failsToday = user && user.reset_fails_at > t - DAY ? user.reset_fails : 0;
+    if (failsToday >= RESET_FAILS_PER_DAY) throw new HttpError(429, 'Забагато неправильних кодів. Спробуйте завтра.');
+    const usable = user?.reset_hash && user.reset_expires > t && user.reset_tries < RESET_TRIES;
     if (!usable) throw new HttpError(400, 'Код недійсний або застарів. Попросіть новий.');
     if (!timingSafeEqual(Buffer.from(sha256(code)), Buffer.from(user.reset_hash))) {
-      run('UPDATE users SET reset_tries = reset_tries + 1 WHERE id = ?', user.id);
+      run(`UPDATE users SET reset_tries = reset_tries + 1, reset_fails = ?,
+           reset_fails_at = CASE WHEN ? THEN reset_fails_at ELSE ? END WHERE id = ?`,
+      failsToday + 1, failsToday > 0 ? 1 : 0, t, user.id);
       throw new HttpError(400, 'Неправильний код');
     }
     await setPassword(user.id, password, res);
@@ -574,16 +601,21 @@ export function createApp({
 
   route('POST', '/api/group', ({ user, body }) => {
     const name = text(body.name, 'Назва групи', { max: 80 });
-    const code = randomBytes(4).toString('hex').toUpperCase();
+    const code = randomBytes(6).toString('hex').toUpperCase();
     const { lastInsertRowid } = run('INSERT INTO study_groups (name, join_code) VALUES (?, ?)', name, code);
     run('UPDATE users SET group_id = ? WHERE id = ?', Number(lastInsertRowid), user.id);
     return { name, code };
   });
 
-  route('POST', '/api/group/join', ({ user, body }) => {
+  route('POST', '/api/group/join', ({ user, body, res }) => {
     const code = text(body.code, 'Код групи', { max: 16 }).toUpperCase();
+    // Wrong codes are limited, so codes cannot be guessed until one opens someone's group.
+    guard(res, [limits.groupJoin, String(user.id)]);
     const group = one('SELECT * FROM study_groups WHERE join_code = ?', code);
-    if (!group) throw new HttpError(404, 'Групи з таким кодом немає');
+    if (!group) {
+      limits.groupJoin.hit(String(user.id));
+      throw new HttpError(404, 'Групи з таким кодом немає');
+    }
     run('UPDATE users SET group_id = ? WHERE id = ?', group.id, user.id);
     return { name: group.name, code: group.join_code };
   });
@@ -639,11 +671,13 @@ export function createApp({
 
   route('DELETE', '/api/deadlines/:id', ({ user, params }) => {
     const { changes } = run(
-      `DELETE FROM deadlines WHERE id = ? AND created_by = ? AND source != 'moodle'
+      `DELETE FROM deadlines WHERE id = ? AND source != 'moodle'
+         AND (created_by = ? OR (created_by IS NULL AND group_id IS NOT NULL))
          AND (owner_user_id = ? OR (group_id IS NOT NULL AND group_id = ?))`,
       params.id, user.id, user.id, user.group_id ?? -1,
     );
     if (!changes) throw new HttpError(404, 'Дедлайн не знайдено');
+    // A group deadline whose author deleted their account can be removed by any member.
     forgetDeadline(params.id);
     return { ok: true };
   });
@@ -989,6 +1023,8 @@ export function createApp({
     if (runs >= AI_RUNS_PER_DAY) throw new HttpError(429, `Генерувати питання можна ${AI_RUNS_PER_DAY} разів на день. Спробуйте завтра.`);
 
     const existing = examQuestions(exam.id);
+    // Counted before the call: a run that fails (timeout, refusal) still costs the provider, so it counts too.
+    run('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)', user.id, now());
     generating.add(user.id);
     let result;
     try {
@@ -1001,7 +1037,6 @@ export function createApp({
     } finally {
       generating.delete(user.id);
     }
-    run('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)', user.id, now());
 
     const filenames = new Map(materials.map((m) => [m.id, m.filename]));
     // The model names the topics; a name the exam does not have yet becomes a new topic.
@@ -1043,6 +1078,8 @@ export function createApp({
     res.end(body);
   }
 
+  let bigBodies = 0;
+
   async function handler(req, res) {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     // Served over HTTPS: browsers should never try plain HTTP again.
@@ -1062,7 +1099,17 @@ export function createApp({
       );
       const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
       if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Розширення не під’єднане' : 'Увійдіть у свій акаунт');
-      const body = ['POST', 'PUT'].includes(req.method) || match.withBody ? await readJson(req, match.limit) : {};
+      const wantsBody = ['POST', 'PUT'].includes(req.method) || match.withBody;
+      // A big body (an upload, a calendar) is held in memory several times over: only a few at once.
+      const big = wantsBody && match.limit > MAX_JSON;
+      if (big && bigBodies >= MAX_BIG_BODIES) throw new HttpError(503, 'Сервер зайнятий іншими завантаженнями. Спробуйте за хвилину.');
+      if (big) bigBodies++;
+      let body;
+      try {
+        body = wantsBody ? await readJson(req, match.limit) : {};
+      } finally {
+        if (big) bigBodies--;
+      }
       const result = await match.fn({ req, res, user, params, body });
       if (!res.headersSent) sendJson(res, 200, result);
     } catch (err) {
@@ -1160,14 +1207,19 @@ export function createApp({
       const sent = new Set(
         all('SELECT item_key, kind FROM reminders_sent WHERE user_id = ?', user.id).map((r) => `${r.item_key}:${r.kind}`),
       );
-      for (const { item, kind } of dueReminders(openItems(user), sent, t, parseReminders(user.tg_remind))) {
-        const button = item.key.startsWith('d') ? { doneKey: item.key } : {};
-        if (!(await sendTo(user, reminderText(item, kind), button))) break;
-        run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
-        // A later reminder makes the earlier ones pointless (the 1-day one replaces a missed 3-day one).
-        for (const earlier of supersededBy(kind)) {
-          run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, earlier);
+      // One user's bad row (or an account deleted meanwhile) must not stop everyone after them.
+      try {
+        for (const { item, kind } of dueReminders(openItems(user), sent, t, parseReminders(user.tg_remind))) {
+          const button = item.key.startsWith('d') ? { doneKey: item.key } : {};
+          if (!(await sendTo(user, reminderText(item, kind), button))) break;
+          run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
+          // A later reminder makes the earlier ones pointless (the 1-day one replaces a missed 3-day one).
+          for (const earlier of supersededBy(kind)) {
+            run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, earlier);
+          }
         }
+      } catch (err) {
+        console.error(`Reminders for ${user.username} failed:`, err.message);
       }
     }
   }
@@ -1191,9 +1243,13 @@ export function createApp({
       `SELECT * FROM users WHERE tg_chat_id IS NOT NULL AND tg_digest = 1 AND (tg_digest_on IS NULL OR tg_digest_on != ?)`, date,
     );
     for (const user of users) {
-      const message = digestText(openItems(user), t, todaysStudy(user, date));
-      if (message && !(await sendTo(user, message))) continue;
-      run('UPDATE users SET tg_digest_on = ? WHERE id = ?', date, user.id);
+      try {
+        const message = digestText(openItems(user), t, todaysStudy(user, date));
+        if (message && !(await sendTo(user, message))) continue;
+        run('UPDATE users SET tg_digest_on = ? WHERE id = ?', date, user.id);
+      } catch (err) {
+        console.error(`Digest for ${user.username} failed:`, err.message);
+      }
     }
   }
 
@@ -1212,7 +1268,10 @@ export function createApp({
 
   async function syncAll() {
     // Users with the extension connected are synced from their browser instead.
-    for (const user of all('SELECT * FROM users WHERE ics_url IS NOT NULL AND ext_key_hash IS NULL')) {
+    for (const { id } of all('SELECT id FROM users WHERE ics_url IS NOT NULL AND ext_key_hash IS NULL')) {
+      // Read the row now, not at the start: the link may have changed (or the account gone) while others synced.
+      const user = one('SELECT * FROM users WHERE id = ? AND ics_url IS NOT NULL AND ext_key_hash IS NULL', id);
+      if (!user) continue;
       try {
         await syncMoodle(user);
       } catch (err) {
@@ -1225,5 +1284,18 @@ export function createApp({
     }
   }
 
-  return { handler, handleTelegramUpdate, runReminders, runDigests, syncAll, cleanup };
+  // A job that takes longer than its interval (slow Telegram) must not start a second copy that sends everything twice.
+  const single = (job) => {
+    let running = false;
+    return async () => {
+      if (running) return;
+      running = true;
+      try { await job(); } finally { running = false; }
+    };
+  };
+
+  return {
+    handler, handleTelegramUpdate, cleanup,
+    runReminders: single(runReminders), runDigests: single(runDigests), syncAll: single(syncAll),
+  };
 }

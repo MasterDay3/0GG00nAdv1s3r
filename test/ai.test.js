@@ -399,3 +399,11 @@ test('ai: a model that never answers falls back, and a final timeout is a clear 
   assert.equal(r.status, 504);
   assert.match(r.data.error, /надто довго/);
 });
+
+test('slides: a slide full of unclosed paragraphs is read in linear time', () => {
+  const slide = `<p:sld>${'<a:p>'.repeat(200_000)}<a:p><a:r><a:t>Real text</a:t></a:r></a:p></p:sld>`;
+  const started = Date.now();
+  const slides = pptxSlides(zip({ 'ppt/slides/slide1.xml': slide }));
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+  assert.equal(slides[0].text, 'Real text');
+});

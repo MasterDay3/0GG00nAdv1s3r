@@ -5,10 +5,12 @@ import { createSafeFetch, isPublicAddress, safeFetch } from '../src/safe-fetch.j
 
 test('safe fetch: private, loopback, link-local and metadata addresses are not public', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0',
-    '::1', '::', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1', '224.0.0.1']) {
+    '::1', '::', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1', '224.0.0.1',
+    '64:ff9b::7f00:1', '64:ff9b::127.0.0.1', '::7f00:1', '2002:7f00:1::', '0:0:0:0:0:ffff:7f00:1', '::ffff:a9fe:a9fe',
+    '2001:db8::1', '2001:0:4136:e378::1', 'ff02::1']) {
     assert.equal(isPublicAddress(ip), false, ip);
   }
-  for (const ip of ['8.8.8.8', '104.16.0.1', '172.32.0.1', '2606:4700::1111', '::ffff:8.8.8.8']) {
+  for (const ip of ['8.8.8.8', '104.16.0.1', '172.32.0.1', '2606:4700::1111', '::ffff:8.8.8.8', '64:ff9b::808:808', '2002:808:808::1', '2a00:1450:4001::200e']) {
     assert.equal(isPublicAddress(ip), true, ip);
   }
   assert.equal(isPublicAddress('not an ip'), false);

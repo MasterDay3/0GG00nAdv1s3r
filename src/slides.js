@@ -46,11 +46,21 @@ function decodeXml(value) {
 }
 
 // Text of an Office XML part: one line per paragraph (<a:p> in slides, <w:p> in Word).
+// Split on the closing tags instead of a lazy regex: a part full of unclosed <a:p> made that regex quadratic
+// and could stop the whole server for hours.
+const MAX_PART = 5 * 1024 * 1024;
 function xmlText(xml, ns) {
+  if (xml.length > MAX_PART) xml = xml.slice(0, MAX_PART);
+  const close = `</${ns}:p>`;
+  const run = new RegExp(`<${ns}:t(?: [^>]*)?>([^<]*)</${ns}:t>`, 'g');
   const lines = [];
-  for (const [paragraph] of xml.matchAll(new RegExp(`<${ns}:p[ >][\\s\\S]*?</${ns}:p>`, 'g'))) {
-    const runs = [...paragraph.matchAll(new RegExp(`<${ns}:t(?: [^>]*)?>([^<]*)</${ns}:t>`, 'g'))].map((m) => decodeXml(m[1]));
-    const line = runs.join('').trim();
+  let from = 0;
+  for (let end = xml.indexOf(close); end !== -1; end = xml.indexOf(close, from)) {
+    const chunk = xml.slice(from, end);
+    from = end + close.length;
+    const open = Math.max(chunk.lastIndexOf(`<${ns}:p>`), chunk.lastIndexOf(`<${ns}:p `));
+    if (open === -1) continue;
+    const line = [...chunk.slice(open).matchAll(run)].map((m) => decodeXml(m[1])).join('').trim();
     if (line) lines.push(line);
   }
   return lines.join('\n');

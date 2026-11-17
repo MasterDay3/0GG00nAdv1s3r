@@ -23,17 +23,43 @@ function blockedV4(ip) {
   });
 }
 
-// True for an address on the public internet.
+// An IPv6 address as eight 16-bit numbers (handles "::" and a dotted IPv4 tail), or null.
+function expandV6(ip) {
+  let text = ip.toLowerCase().split('%')[0];
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    const n = v4Number(dotted[1]);
+    text = `${text.slice(0, -dotted[1].length)}${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`;
+  }
+  const [head, tail] = text.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const missing = text.includes('::') ? 8 - left.length - right.length : 0;
+  const parts = [...left, ...Array(missing).fill('0'), ...right].map((h) => parseInt(h, 16));
+  return parts.length === 8 && parts.every((n) => n >= 0 && n <= 0xffff) ? parts : null;
+}
+
+const v4From = (hi, lo) => [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+
+// True for an address on the public internet. IPv6 forms that carry an IPv4 inside (mapped, compatible, NAT64,
+// 6to4) are judged by that IPv4, whichever way they are written.
 export function isPublicAddress(ip) {
   const family = isIP(ip);
   if (family === 4) return !blockedV4(ip);
   if (family !== 6) return false;
-  const lower = ip.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower) || /^64:ff9b::(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return !blockedV4(mapped[1]);
-  if (lower === '::' || lower === '::1') return false;
-  // fc00::/7 unique local, fe80::/10 link local, fec0::/10 old site local, ff00::/8 multicast, 2001:db8::/32 docs.
-  return !/^(f[cd]|fe[89ab]|fe[c-f]|ff)/.test(lower) && !lower.startsWith('2001:db8:') && !lower.startsWith('::ffff:');
+  const h = expandV6(ip);
+  if (!h) return false;
+  const zeros = (from, to) => h.slice(from, to).every((x) => x === 0);
+  if (zeros(0, 6)) return h[6] === 0 && h[7] <= 1 ? false : !blockedV4(v4From(h[6], h[7])); // ::, ::1, ::a.b.c.d
+  if (zeros(0, 5) && h[5] === 0xffff) return !blockedV4(v4From(h[6], h[7])); // ::ffff:a.b.c.d
+  if (h[0] === 0x64 && h[1] === 0xff9b) return zeros(2, 6) && !blockedV4(v4From(h[6], h[7])); // NAT64 (local-use /48 blocked)
+  if (h[0] === 0x2002) return !blockedV4(v4From(h[1], h[2])); // 6to4
+  if (h[0] === 0x2001 && (h[1] === 0 || h[1] === 0xdb8)) return false; // Teredo, documentation
+  if (h[0] === 0x100 && zeros(1, 4)) return false; // discard prefix
+  if ((h[0] & 0xfe00) === 0xfc00) return false; // unique local
+  if ((h[0] & 0xffc0) === 0xfe80 || (h[0] & 0xffc0) === 0xfec0) return false; // link and site local
+  if ((h[0] & 0xff00) === 0xff00) return false; // multicast
+  return true;
 }
 
 export class BlockedAddressError extends Error {

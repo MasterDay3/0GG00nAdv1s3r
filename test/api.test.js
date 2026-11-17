@@ -106,7 +106,7 @@ test('board: personal vs group deadlines, per-user notes, urgency and delete rig
   const outsider = await signedUp(base, 'outsider');
 
   const group = (await mykola('POST', '/api/group', { name: 'PZ-2' })).data;
-  assert.match(group.code, /^[A-F0-9]{8}$/);
+  assert.match(group.code, /^[A-F0-9]{12}$/);
   assert.equal((await maryan('POST', '/api/group/join', { code: group.code.toLowerCase() })).status, 200);
   assert.equal((await outsider('POST', '/api/group/join', { code: 'NOPE' })).status, 404);
 
@@ -899,4 +899,108 @@ test('account: export downloads all your data as JSON, without secrets', async (
   const text = JSON.stringify(data);
   assert.doesNotMatch(text, /pass_hash|ext_key|anna|authtoken|secret-token/);
   assert.equal((await client(base)('GET', '/api/export')).status, 401);
+});
+
+test('audit: a new password revokes the extension key; log out everywhere also the calendar link and Telegram', async (t) => {
+  const { app, base, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const { key } = (await call('POST', '/api/extension/key', {})).data;
+  const ext = () => fetch(`${base}/api/extension/config`, { headers: { authorization: `Bearer ${key}` } });
+  assert.equal((await ext()).status, 200);
+  await call('PUT', '/api/password', { current: 'correct horse', password: 'battery staple' });
+  assert.equal((await ext()).status, 401, 'the key made before the new password stops working');
+
+  const { path } = (await call('POST', '/api/calendar-feed', {})).data;
+  const { code } = (await call('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 9, type: 'private' }, text: `/start ${code}` } });
+  await call('POST', '/api/logout-all', {});
+  assert.equal((await fetch(base + path)).status, 404);
+  const again = client(base);
+  await again('POST', '/api/login', { username: 'mykola', password: 'battery staple' });
+  assert.equal((await again('GET', '/api/me')).data.telegram.linked, false);
+});
+
+test('audit: absurd dates and links with line breaks are refused', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  assert.equal((await call('POST', '/api/exams', { title: 'X', examAt: 1e300 })).status, 400);
+  assert.equal((await call('POST', '/api/deadlines', { title: 'X', dueAt: -1e15 })).status, 400);
+  const bad = await call('POST', '/api/deadlines', { title: 'X', dueAt: NOW + DAY, url: 'https://ok.example/\nBEGIN:VALARM' });
+  assert.equal(bad.status, 400);
+});
+
+test('audit: a moved Moodle date brings reminders back; an empty feed deletes nothing', async (t) => {
+  let clock = NOW;
+  let feed = FEED;
+  const { app, base, sent, close } = await start({ now: () => clock, fetchImpl: async () => new Response(feed) });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('PUT', '/api/settings', { icsUrl: 'https://moodle.example/cal.ics' });
+  await call('POST', '/api/sync', {});
+  const { code } = (await call('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 5, type: 'private' }, text: `/start ${code}` } });
+  const [item] = (await call('GET', '/api/deadlines')).data.items;
+  await call('PUT', '/api/notes', { key: item.key, text: 'Ask about part 2' });
+  sent.length = 0;
+  await app.runReminders();
+  assert.equal(sent.length, 1);
+
+  feed = FEED.replace(icsStamp(NOW + 30 * HOUR), icsStamp(NOW + 8 * DAY));
+  await call('POST', '/api/sync', {});
+  clock = NOW + 7 * DAY + 4 * HOUR;
+  await app.runReminders();
+  assert.equal(sent.length, 2, 'the 1-day reminder comes again for the new date');
+
+  feed = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR';
+  await call('POST', '/api/sync', {});
+  const after = (await call('GET', '/api/deadlines')).data.items;
+  assert.equal(after.length, 1);
+  assert.equal(after[0].note, 'Ask about part 2');
+});
+
+test('audit: overlapping job runs send one reminder, not two', async (t) => {
+  const messages = [];
+  let slow = null;
+  const telegram = {
+    enabled: true,
+    botName: async () => 'dueboard_test_bot',
+    // While `slow` is set, every send waits for it: a Telegram that takes longer than a job tick.
+    send: async (chatId, text) => { if (slow) await slow; messages.push(text); },
+    editMessage: async () => {},
+    answerButton: async () => {},
+  };
+  const { app, base, close } = await start({ telegram });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await linkTelegram(app, call, 3);
+  await call('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 20 * HOUR });
+  messages.length = 0;
+  let release;
+  slow = new Promise((resolve) => { release = resolve; });
+  const first = app.runReminders();
+  const second = app.runReminders(); // the next minute's tick while the first still waits on Telegram
+  release();
+  await Promise.all([first, second]);
+  assert.equal(messages.filter((m) => /Essay/.test(m)).length, 1);
+});
+
+test('audit: wrong reset codes add up across new codes', async (t) => {
+  let clock = NOW;
+  const { app, base, sent, close } = await start({ now: () => clock });
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  await linkTelegram(app, mykola, 5);
+  const anon = client(base);
+  const guess = () => anon('POST', '/api/password-reset/confirm', { username: 'mykola', code: '000000', password: 'battery staple' });
+  for (let round = 0; round < 2; round++) {
+    await anon('POST', '/api/password-reset', { username: 'mykola' });
+    for (let i = 0; i < 5; i++) await guess();
+    clock += 16 * 60 * 1000;
+  }
+  await anon('POST', '/api/password-reset', { username: 'mykola' });
+  const code = /(\d{6})/.exec(sent.at(-1).text)[1];
+  const res = await anon('POST', '/api/password-reset/confirm', { username: 'mykola', code, password: 'battery staple' });
+  assert.equal(res.status, 429, 'ten wrong codes in a day lock resets until tomorrow, even with the right new code');
 });

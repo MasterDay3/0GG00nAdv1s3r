@@ -365,7 +365,7 @@ function deadlineRow(item, now, reload) {
           if (await act(() => api('PUT', '/api/done', { key: item.key, done: !item.done }))) reload();
         },
       }, item.done ? 'Повернути' : 'Виконано') : null,
-      item.canDelete ? h('button', {
+      item.canEdit ? h('button', {
         type: 'button', class: 'secondary small',
         onclick: (e) => {
           const row = e.currentTarget.closest('li');

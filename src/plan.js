@@ -14,10 +14,10 @@ export function daysBetween(from, to) {
   return Math.round((toUtc(to) - toUtc(from)) / MS_PER_DAY);
 }
 
+// The calendar day in Kyiv, whatever time zone the process runs in (the digest uses the same rule).
+const KYIV_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' });
 export function localDate(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return KYIV_DAY.format(new Date(ms));
 }
 
 // topics: [{ name, status: 'weak' | 'strong' | 'untested' }]. Untested topics count as weak.
