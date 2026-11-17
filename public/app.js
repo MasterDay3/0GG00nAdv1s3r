@@ -431,15 +431,68 @@ async function showBoard() {
       onchange: (e) => { sessionStorageSet('showDone', e.target.checked ? '1' : '0'); render(); },
     }), `Виконані (${doneItems.length})`) : null;
 
-  const list = [...(showPast ? past : []), ...upcoming];
+  // Search and course filter work on the page only, so typing never waits for the server.
+  const courses = [...new Set(items.map((i) => i.course).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'uk'));
+  let query = sessionStorageGet('boardQuery') || '';
+  let course = sessionStorageGet('boardCourse') || '';
+  if (course && !courses.includes(course)) course = '';
+  const listBox = h('div', { class: 'board-list' });
 
-  // Rule the ledger by day; everything past due sits in one group at the top.
-  const groups = [];
-  for (const item of list) {
-    const key = item.urgency === 'overdue' ? 'past' : dateOf(item.dueAt);
-    if (groups.at(-1)?.key !== key) groups.push({ key, items: [] });
-    groups.at(-1).items.push(item);
+  function drawList() {
+    const words = query.toLocaleLowerCase('uk').split(/\s+/).filter(Boolean);
+    const matches = (item) => (!course || item.course === course)
+      && words.every((w) => `${item.title} ${item.course} ${item.note}`.toLocaleLowerCase('uk').includes(w));
+    const filtering = Boolean(course || words.length);
+    // While searching, past deadlines are searched too: the one you look for may be overdue.
+    const list = [...(showPast || filtering ? past : []), ...upcoming].filter(matches);
+    const doneShown = showDone || filtering ? doneItems.filter(matches) : [];
+
+    // Rule the ledger by day; everything past due sits in one group at the top.
+    const groups = [];
+    for (const item of list) {
+      const key = item.urgency === 'overdue' ? 'past' : dateOf(item.dueAt);
+      if (groups.at(-1)?.key !== key) groups.push({ key, items: [] });
+      groups.at(-1).items.push(item);
+    }
+
+    let empty = null;
+    if (!list.length && filtering) {
+      empty = h('div', { class: 'panel empty' }, h('p', {}, doneShown.length ? 'Серед відкритих дедлайнів нічого не знайдено.' : 'Нічого не знайдено.'));
+    } else if (!list.length) {
+      empty = h('div', { class: 'panel empty' },
+        h('p', {}, doneItems.length ? 'Усе зроблено. На дошці порожньо 🎉' : 'Дедлайнів поки немає.'),
+        doneItems.length ? null : h('p', {}, h('a', { href: '#/settings' }, 'Під’єднайте календар Moodle'), ' або додайте дедлайн вище.'));
+    }
+
+    listBox.replaceChildren(...[
+      ...groups.map((g) => h('section', { class: 'day' },
+        h('div', { class: 'day-head' },
+          h('h2', {}, g.key === 'past' ? 'Прострочено' : dayLabel(g.key)),
+          g.key === 'past' ? null : h('span', { class: 'num' }, new Date(g.key.replace(/-/g, '/')).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' }))),
+        h('ul', { class: 'ledger' }, g.items.map((item) => deadlineRow(item, now, render))))),
+      empty,
+      doneShown.length
+        ? h('section', { class: 'day done-list' },
+          h('div', { class: 'day-head' }, h('h2', {}, 'Виконані'), h('span', { class: 'num' }, String(doneShown.length))),
+          h('ul', { class: 'ledger' }, doneShown.map((item) => deadlineRow(item, now, render))))
+        : null,
+    ].filter(Boolean));
   }
+
+  const filterBar = items.length ? h('div', { class: 'filter-bar', role: 'search' },
+    h('label', { class: 'grow' }, h('span', { class: 'visually-hidden' }, 'Пошук'),
+      h('input', {
+        type: 'search', placeholder: 'Пошук за назвою, курсом чи нотаткою', value: query, 'aria-label': 'Пошук дедлайнів',
+        oninput: (e) => { query = e.target.value; sessionStorageSet('boardQuery', query); drawList(); },
+      })),
+    courses.length > 1 ? h('label', {}, h('span', { class: 'visually-hidden' }, 'Курс'),
+      h('select', {
+        'aria-label': 'Фільтр за курсом',
+        onchange: (e) => { course = e.target.value; sessionStorageSet('boardCourse', course); drawList(); },
+      },
+      h('option', { value: '' }, 'Усі курси'),
+      courses.map((c) => h('option', { value: c, selected: c === course }, c)))) : null) : null;
+  drawList();
 
   const syncButton = me.icsUrl ? h('button', {
     type: 'button', class: 'secondary',
@@ -470,20 +523,8 @@ async function showBoard() {
           doneToggle)),
       upcoming.length ? nextCard(upcoming[0], now) : null),
     addDeadlineForm(render),
-    list.length
-      ? groups.map((g) => h('section', { class: 'day' },
-        h('div', { class: 'day-head' },
-          h('h2', {}, g.key === 'past' ? 'Прострочено' : dayLabel(g.key)),
-          g.key === 'past' ? null : h('span', { class: 'num' }, new Date(g.key.replace(/-/g, '/')).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' }))),
-        h('ul', { class: 'ledger' }, g.items.map((item) => deadlineRow(item, now, render)))))
-      : h('div', { class: 'panel empty' },
-        h('p', {}, doneItems.length ? 'Усе зроблено. На дошці порожньо 🎉' : 'Дедлайнів поки немає.'),
-        doneItems.length ? null : h('p', {}, h('a', { href: '#/settings' }, 'Під’єднайте календар Moodle'), ' або додайте дедлайн вище.')),
-    showDone && doneItems.length
-      ? h('section', { class: 'day done-list' },
-        h('div', { class: 'day-head' }, h('h2', {}, 'Виконані'), h('span', { class: 'num' }, String(doneItems.length))),
-        h('ul', { class: 'ledger' }, doneItems.map((item) => deadlineRow(item, now, render))))
-      : null,
+    filterBar,
+    listBox,
   );
 }
 
