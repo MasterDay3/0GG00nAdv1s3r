@@ -67,6 +67,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `ui`: Log out offline no longer pretends to sign out while the session stays valid; another account's saved offline data is cleared on log in; coming back online no longer wipes a running test or a half-typed form; a slow screen can no longer draw over a newer one; a double Enter or double click no longer creates two deadlines or saves a test twice; focus moves to the new screen's heading and the page is no longer re-read by screen readers on every change; reminder checkboxes show the real state after a failed save; a failed extension connect no longer shows Connected.
+- `infra`: The extension no longer shows an error badge for the hourly background sync when a Moodle visit synced within the day; the popup is fully Ukrainian.
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).
 - `api`: A chat that blocked the bot is unlinked instead of failing every minute.
 - `api`: The bot ignores group chats, so personal deadlines are never posted to a group.

@@ -37,7 +37,34 @@ function toast(message, isError = false) {
 
 const offlineEl = document.getElementById('offline');
 
+// Forms are locked from submit until their requests finish, so a double Enter does not create two deadlines.
+let inFlight = 0;
+function releaseForms() {
+  for (const form of document.querySelectorAll('form[data-busy]')) {
+    delete form.dataset.busy;
+    for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = false;
+  }
+}
+document.addEventListener('submit', (e) => {
+  const form = e.target;
+  if (form.dataset.busy) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  form.dataset.busy = '1';
+  for (const b of form.querySelectorAll('button[type=submit]')) b.disabled = true;
+  // A handler that stops before any request (a cancelled confirm) frees the form again.
+  setTimeout(() => { if (!inFlight) releaseForms(); }, 50);
+}, true);
+
 async function api(method, path, body) {
+  inFlight++;
+  try {
+    return await request(method, path, body);
+  } finally {
+    inFlight--;
+    if (!inFlight) setTimeout(() => { if (!inFlight) releaseForms(); }, 0);
+  }
+}
+
+async function request(method, path, body) {
   let res;
   try {
     res = await fetch(path, {
@@ -53,7 +80,8 @@ async function api(method, path, body) {
   offlineEl.hidden = !res.headers.get('x-dueboard-offline');
   const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : null;
   if (!res.ok) {
-    if (res.status === 401 && me) { me = null; forgetSavedData(); render(); }
+    if (res.status === 401) forgetSavedData();
+    if (res.status === 401 && me) { me = null; render(); }
     throw new Error(data?.error || `Запит не вдався (${res.status})`);
   }
   return data;
@@ -144,26 +172,42 @@ function setView(...nodes) {
   main.replaceChildren(...nodes.flat(Infinity).filter(Boolean));
 }
 
+// Each screen load gets a number; a slow load that finishes after a newer one must not draw over it.
+let renderSeq = 0;
+let lastRoute = null;
+
 // ---------- routing ----------
 
 async function render() {
+  const seq = ++renderSeq;
   nav.hidden = !me;
-  const [, view = 'board', id] = (location.hash || '#/board').split('/');
+  const route = location.hash || '#/board';
+  const [, view = 'board', id] = route.split('/');
   for (const a of nav.querySelectorAll('a')) a.classList.toggle('active', a.dataset.view === view);
   if (!me) return showAuth();
   try {
-    if (view === 'prep' && id) await showExam(Number(id));
-    else if (view === 'prep') await showPrep();
-    else if (view === 'settings') await showSettings();
-    else await showBoard();
+    if (view === 'prep' && id) await showExam(Number(id), seq);
+    else if (view === 'prep') await showPrep(seq);
+    else if (view === 'settings') await showSettings(seq);
+    else await showBoard(seq);
   } catch (err) {
-    if (me) setView(h('div', { class: 'panel empty' }, h('p', {}, err.message), h('p', {}, h('a', { href: '#/board' }, 'На дошку'))));
+    if (me && seq === renderSeq) setView(h('div', { class: 'panel empty' }, h('p', {}, err.message), h('p', {}, h('a', { href: '#/board' }, 'На дошку'))));
+  }
+  // A new screen: move focus to its heading so keyboard and screen-reader users start there.
+  if (seq === renderSeq && route !== lastRoute) {
+    lastRoute = route;
+    const head = main.querySelector('h1');
+    if (head) { head.tabIndex = -1; head.focus({ preventScroll: true }); }
   }
 }
 
+// True when a newer screen load started after this one.
+const stale = (seq) => seq !== undefined && seq !== renderSeq;
+
 window.addEventListener('hashchange', render);
 document.getElementById('logout').addEventListener('click', async () => {
-  await act(() => api('POST', '/api/logout', {}));
+  // Offline the session stays valid on the server: say so instead of only looking logged out.
+  if (!(await act(() => api('POST', '/api/logout', {})))) return;
   forgetSavedData();
   me = null;
   location.hash = '#/board';
@@ -186,6 +230,7 @@ function showAuth() {
       error.textContent = '';
       try {
         await api('POST', mode === 'login' ? '/api/login' : '/api/register', formData(form));
+        forgetSavedData();
         await refreshMe();
         render();
       } catch (err) {
@@ -247,6 +292,7 @@ function showReset(username = '') {
         error.textContent = '';
         try {
           await api('POST', '/api/password-reset/confirm', { username: name, code: codeForm.code.value, password: codeForm.password.value });
+          forgetSavedData();
           await refreshMe();
           toast('Пароль змінено');
           location.hash = '#/board';
@@ -424,7 +470,7 @@ function addDeadlineForm(reload) {
   return h('details', { class: 'panel compact add-deadline' }, h('summary', {}, 'Додати дедлайн, якого немає в Moodle'), form);
 }
 
-async function showBoard() {
+async function showBoard(seq) {
   const [{ items, now }] = await Promise.all([api('GET', '/api/deadlines'), refreshMe()]);
   const showPast = sessionStorageGet('showPast') === '1';
   const showDone = sessionStorageGet('showDone') === '1';
@@ -529,6 +575,7 @@ async function showBoard() {
     h('strong', {}, 'Дедлайни з Moodle не оновлюються. '), me.syncError.replace(/[.!]?$/, '. '),
     h('a', { href: '#/settings' }, 'Перевірити посилання')) : null;
 
+  if (stale(seq)) return;
   setView(
     syncWarning,
     h('div', { class: 'board-head' },
@@ -611,7 +658,9 @@ function extensionCard() {
         const { key } = (await act(() => api('POST', '/api/extension/key', {}))) || {};
         if (key) {
           const r = await act(() => extensionCall('connect', { key }));
-          toast(r ? `Розширення під’єднано, синхронізовано подій Moodle: ${r.imported}` : 'Розширення під’єднано. Воно синхронізує календар, щойно ви відкриєте Moodle.');
+          // The extension did not take the key: take it back, so Settings does not claim a connection that is not there.
+          if (r) toast(`Розширення під’єднано, синхронізовано подій Moodle: ${r.imported}`);
+          else await api('DELETE', '/api/extension/key').catch(() => {});
         }
         render();
       },
@@ -640,7 +689,7 @@ function extensionCard() {
 
 // ---------- settings ----------
 
-async function showSettings() {
+async function showSettings(seq) {
   await refreshMe();
 
   const moodleForm = h('form', {
@@ -743,6 +792,7 @@ async function showSettings() {
   };
   renderTelegram();
 
+  if (stale(seq)) return;
   setView(
     h('div', { class: 'page-head' },
       h('h1', {}, 'Налаштування'),
@@ -769,6 +819,8 @@ function reminderChoice() {
         const kinds = boxes.filter((b) => b.querySelector('input').checked).map((b) => b.querySelector('input').value);
         const r = await act(() => api('PUT', '/api/telegram/reminders', { kinds }), kinds.length ? 'Збережено' : 'Нагадування вимкнено, дайджест лишається');
         if (r) me.telegram.reminders = r.reminders;
+        // Not saved: show what is really set.
+        for (const b of boxes) { const input = b.querySelector('input'); input.checked = me.telegram.reminders.includes(input.value); }
       },
     }), label));
   return h('fieldset', { class: 'reminder-choice' }, h('legend', { class: 'small muted' }, 'Коли нагадувати'), boxes);
@@ -888,7 +940,7 @@ function accountCard() {
 
 // ---------- exam prep ----------
 
-async function showPrep() {
+async function showPrep(seq) {
   const exams = await api('GET', '/api/exams');
   const form = h('form', {
     onsubmit: async (e) => {
@@ -905,6 +957,7 @@ async function showPrep() {
     h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true })),
     h('button', { type: 'submit', class: 'shrink' }, 'Додати екзамен')));
 
+  if (stale(seq)) return;
   setView(
     h('div', { class: 'page-head' },
       h('h1', {}, 'Підготовка до екзаменів'),
@@ -1206,7 +1259,7 @@ function planBlock(exam) {
     exam.result ? null : h('p', { class: 'muted small' }, 'Пройдіть діагностичний тест, щоб план поставив слабкі теми першими.'));
 }
 
-async function showExam(id) {
+async function showExam(id, seq) {
   const exam = await api('GET', `/api/exams/${id}`);
   const reload = () => render();
   const questionCount = exam.topics.reduce((n, t) => n + t.questions.length, 0);
@@ -1220,6 +1273,7 @@ async function showExam(id) {
   }, h('label', { class: 'grow' }, 'Нова тема', h('input', { name: 'name', required: true, maxlength: 120, placeholder: 'напр. Границі' })),
   h('button', { type: 'submit', class: 'secondary shrink' }, 'Додати тему'));
 
+  if (stale(seq)) return;
   setView(
     h('a', { class: 'back', href: '#/prep' }, 'Усі екзамени'),
     h('div', { class: 'head page-head', 'data-edit': '' },
@@ -1253,8 +1307,8 @@ async function showExam(id) {
       h('div', { class: 'head' },
         h('h2', {}, 'Діагностичний тест'),
         h('div', { class: 'tools' },
-          exam.mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam, exam.mistakes) }, `Повторити помилки (${exam.mistakes.length})`) : null,
-          h('button', { type: 'button', disabled: !questionCount, onclick: () => showTest(exam) }, exam.result ? 'Пройти ще раз' : 'Пройти тест'))),
+          exam.mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => act(() => showTest(exam, exam.mistakes)) }, `Повторити помилки (${exam.mistakes.length})`) : null,
+          h('button', { type: 'button', disabled: !questionCount, onclick: () => act(() => showTest(exam)) }, exam.result ? 'Пройти ще раз' : 'Пройти тест'))),
       h('p', { class: 'muted small' }, questionCount
         ? `${plural(questionCount, QUESTIONS)} у ${plural(exam.topics.length, ['темі', 'темах', 'темах'])}. Від 70 % правильних тема вважається сильною.`
         : 'Додайте нижче теми й кілька питань, а потім пройдіть тест.')),
@@ -1314,6 +1368,7 @@ function sourceHint(source) {
 // The diagnostic test, one question at a time with instant feedback. Scored on the server at the end.
 // only: question ids for a practice round on mistakes; it is not saved and does not change the diagnostic.
 async function showTest(exam, only = null) {
+  const seq = ++renderSeq;
   const { questions } = await api('GET', `/api/exams/${exam.id}/test`);
   const practice = Array.isArray(only);
   const order = shuffled(practice ? questions.filter((q) => only.includes(q.id)) : questions);
@@ -1332,9 +1387,15 @@ async function showTest(exam, only = null) {
     root.querySelector('.quiz-next')?.focus();
   }
 
+  let finishing = false;
   function next() {
+    if (finishing) return;
     index++;
-    if (index < order.length) draw(); else finish();
+    if (index < order.length) return draw();
+    // Saving takes a moment: a second click must not save the attempt twice.
+    finishing = true;
+    for (const b of root.querySelectorAll('button')) b.disabled = true;
+    finish();
   }
 
   function onKey(e) {
@@ -1414,12 +1475,13 @@ async function showTest(exam, only = null) {
           answers[q.id] === undefined ? h('p', { class: 'muted small' }, 'Без відповіді.') : null,
           sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'Жодної помилки.'),
       h('div', { class: 'quiz-actions' },
-        mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam, mistakes.map((q) => q.id)) }, `Повторити помилки (${mistakes.length})`) : null,
-        practice ? null : h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam) }, 'Пройти ще раз'),
+        mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => act(() => showTest(exam, mistakes.map((q) => q.id))) }, `Повторити помилки (${mistakes.length})`) : null,
+        practice ? null : h('button', { type: 'button', class: 'secondary', onclick: () => act(() => showTest(exam)) }, 'Пройти ще раз'),
         h('button', { type: 'button', onclick: backToExam }, 'До плану підготовки'))).childNodes);
     window.scrollTo(0, 0);
   }
 
+  if (stale(seq)) return;
   setView(
     h('a', { class: 'back', href: `#/prep/${exam.id}` }, exam.title),
     h('div', { class: 'page-head' },
@@ -1444,4 +1506,5 @@ async function showTest(exam, only = null) {
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('Service worker:', err.message));
 }
-window.addEventListener('online', () => { if (me) render(); });
+// Back online: hide the notice, but never redraw the screen (a test or a half-typed form would be lost).
+window.addEventListener('online', () => { offlineEl.hidden = true; });

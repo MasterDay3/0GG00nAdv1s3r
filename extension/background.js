@@ -56,11 +56,16 @@ async function sync() {
     const res = await fetch(await calendarLink(), { credentials: 'include' });
     const ics = await res.text();
     if (!res.ok || !/BEGIN:VCALENDAR/i.test(ics)) {
-      throw new Error('Moodle просить пройти перевірку браузера. Відкрийте Moodle, і синхронізація запуститься звідти.');
+      const err = new Error('Moodle просить пройти перевірку браузера. Відкрийте Moodle, і синхронізація запуститься звідти.');
+      err.botCheck = true;
+      throw err;
     }
     return await upload(ics);
   } catch (err) {
-    await setStatus(false, err.message);
+    // The hourly background sync usually meets the bot check; when a Moodle visit synced within a day, that is no alarm.
+    const { lastOkAt } = await chrome.storage.local.get('lastOkAt');
+    const recentOk = lastOkAt && Date.now() - lastOkAt < 24 * 60 * 60 * 1000;
+    if (!(err.botCheck && recentOk)) await setStatus(false, err.message);
     return { ok: false, error: err.message };
   }
 }

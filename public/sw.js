@@ -22,7 +22,9 @@ async function networkFirst(request, cacheName, fallbackKey = request) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response.ok) await cache.put(fallbackKey, response.clone());
+    // Only a real page goes in place of the app page; data and scripts go under their own URL.
+    const isPage = (response.headers.get('content-type') || '').startsWith('text/html');
+    if (response.ok && (fallbackKey !== '/' || isPage)) await cache.put(fallbackKey, response.clone());
     return response;
   } catch (err) {
     const cached = await cache.match(fallbackKey);

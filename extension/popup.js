@@ -14,7 +14,7 @@ async function show() {
   statusEl.textContent = status ? status.message : 'Чекаю першої синхронізації.';
   statusEl.className = status && !status.ok ? 'bad' : '';
   const when = lastOkAt ? `Остання вдала синхронізація: ${new Date(lastOkAt).toLocaleString('uk-UA')}` : 'Вдалих синхронізацій ще не було';
-  detailsEl.textContent = `${when}. Syncs every hour and when you open Moodle. Dueboard: ${server}`;
+  detailsEl.textContent = `${when}. Синхронізація щогодини й коли ви відкриваєте Moodle. Dueboard: ${server}`;
 }
 
 button.addEventListener('click', async () => {
