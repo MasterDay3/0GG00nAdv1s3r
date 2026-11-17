@@ -35,18 +35,33 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => { toastEl.hidden = true; }, Math.max(3500, message.length * 60));
 }
 
+const offlineEl = document.getElementById('offline');
+
 async function api(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    offlineEl.hidden = false;
+    throw new Error('Немає з’єднання з інтернетом');
+  }
+  // The service worker answers from saved data when offline and marks it.
+  offlineEl.hidden = !res.headers.get('x-dueboard-offline');
   const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : null;
   if (!res.ok) {
-    if (res.status === 401 && me) { me = null; render(); }
+    if (res.status === 401 && me) { me = null; forgetSavedData(); render(); }
     throw new Error(data?.error || `Запит не вдався (${res.status})`);
   }
   return data;
+}
+
+// Saved offline copies of the board belong to the signed-in account: drop them on log out.
+function forgetSavedData() {
+  if ('caches' in window) caches.delete('dueboard-data').catch(() => {});
 }
 
 // Run an action from a button/form; show errors as a toast.
@@ -100,7 +115,7 @@ function relative(ms, now = Date.now()) {
 function fmtSize(bytes) {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} КБ`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+  return `${String(Number((bytes / 1024 / 1024).toFixed(1))).replace('.', ',')} МБ`;
 }
 
 // Ukrainian plural: forms = [1 питання, 2 питання, 5 питань].
@@ -149,6 +164,7 @@ async function render() {
 window.addEventListener('hashchange', render);
 document.getElementById('logout').addEventListener('click', async () => {
   await act(() => api('POST', '/api/logout', {}));
+  forgetSavedData();
   me = null;
   location.hash = '#/board';
   render();
@@ -785,7 +801,7 @@ function calendarCard() {
 }
 
 function accountCard() {
-  const signedOut = () => { me = null; location.hash = '#/board'; render(); };
+  const signedOut = () => { me = null; forgetSavedData(); location.hash = '#/board'; render(); };
 
   const passwordForm = h('form', {
     onsubmit: async (e) => {
@@ -1370,3 +1386,9 @@ async function showTest(exam, only = null) {
   try { await refreshMe(); } catch { me = null; }
   render();
 })();
+
+// Install as an app and open offline. Not on plain http hosts other than localhost (browsers refuse there anyway).
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('Service worker:', err.message));
+}
+window.addEventListener('online', () => { if (me) render(); });

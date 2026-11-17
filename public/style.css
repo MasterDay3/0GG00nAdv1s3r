@@ -406,3 +406,12 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .progress-topics td.up { color: var(--color-green); }
 .progress-topics td.down { color: var(--color-error); }
 .storage { margin-top: var(--space-sm); } .storage .bar { max-width: 320px; margin-top: var(--space-2xs); }
+
+/* Installed app (PWA): offline notice and the notch / home bar on phones */
+.offline {
+  margin: 0; padding: var(--space-xs) var(--space-md); text-align: center; font-size: var(--text-sm);
+  background: var(--color-paper-3); color: var(--color-ink-2); border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+.topbar { padding-top: max(var(--space-xs), env(safe-area-inset-top)); }
+#toast { bottom: max(var(--space-lg), calc(env(safe-area-inset-bottom) + var(--space-sm))); }
+body { padding-bottom: env(safe-area-inset-bottom); }

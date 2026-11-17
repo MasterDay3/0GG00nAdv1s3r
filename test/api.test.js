@@ -742,3 +742,21 @@ test('materials: one account has a storage limit across all its exams', async (t
   await call('DELETE', `/api/materials/${fileId}`);
   assert.equal(await upload(call, b, 60), 200, 'deleting a file frees its space');
 });
+
+test('pwa: manifest, service worker and icons are served with the right types', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const manifest = await fetch(`${base}/manifest.webmanifest`);
+  assert.match(manifest.headers.get('content-type'), /^application\/manifest\+json/);
+  const data = await manifest.json();
+  assert.equal(data.display, 'standalone');
+  for (const icon of data.icons) {
+    const res = await fetch(base + icon.src);
+    assert.equal(res.status, 200, icon.src);
+    assert.equal(res.headers.get('content-type'), icon.type);
+  }
+  const sw = await fetch(`${base}/sw.js`);
+  assert.match(sw.headers.get('content-type'), /^text\/javascript/);
+  assert.equal(sw.headers.get('cache-control'), 'no-cache', 'browsers must see a new worker at once');
+  assert.equal((await fetch(`${base}/apple-touch-icon.png`)).headers.get('content-type'), 'image/png');
+});

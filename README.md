@@ -64,6 +64,7 @@ the calendar link and upload the calendar. The extension is set up for `learn.uc
 - **Deadline board.** Connect Moodle with its read-only calendar link (Calendar → Export → Get calendar URL), or import an `.ics` file. One list colour-coded by urgency: red under 48 h, amber under 7 days, grey later. Re-syncs every 6 hours. Search by title, course or note and filter by course.
 - **Own and group deadlines.** Add a deadline Moodle does not know about, for yourself or your whole group (join with a code). The author can edit it later; a new date brings its reminders back.
 - **Calendar feed.** Settings → Google or Apple Calendar makes a secret link (`/cal/<token>.ics`) that a phone calendar subscribes to: open deadlines and exams, refreshed by the calendar app. A new link turns the old one off.
+- **Phone app.** Open the site on a phone and choose "Add to Home Screen" (iPhone: Share → Add to Home Screen): it opens full screen like an app. Without a connection it shows the last saved board and exams.
 - **Personal notes** on any deadline.
 - **Account.** Change the password (other devices are signed out), log out everywhere, delete the account. A forgotten password is reset with a code the Telegram bot sends to the linked chat.
 - **Brute-force limits.** 5 wrong passwords per account and address in 15 minutes, 30 per account in an hour; behind Caddy the real address comes from `X-Forwarded-For`.
