@@ -44,7 +44,7 @@ Settings live in `/etc/dueboard.env` (kept between runs). Logs: `journalctl -u d
 
 **Auto-deploy.** Merging into `main` is enough: every minute the server checks GitHub, runs `npm test` on a new
 commit, deploys it and checks that the app answers. If the tests fail the commit is skipped; if the new version does not
-start, the server rolls back to the previous commit. Logs: `journalctl -u dueboard-autodeploy`.
+start, the server rolls back to the previous commit with that commit's own setup (units and Caddy included). Before every deploy the database is copied to `/var/lib/dueboard-autodeploy/before-<commit>.db` (the last 5 are kept). A deploy that fails although its tests passed is tried 3 times. Running `setup.sh` by hand with `BRANCH` or `COMMIT` pins that version: auto-deploy waits until `setup.sh` runs again without them. Logs: `journalctl -u dueboard-autodeploy`.
 
 ## Moodle sync through the Chrome extension
 

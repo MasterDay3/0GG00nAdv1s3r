@@ -18,6 +18,24 @@ export DEBIAN_FRONTEND=noninteractive
 
 [ "$(id -u)" = 0 ] || { echo "Run as root (sudo)"; exit 1; }
 
+# One deploy at a time: a manual run waits for auto-deploy (which already holds the lock when it calls this script).
+STATE_DIR=/var/lib/dueboard-autodeploy
+# Called by auto-deploy (even an older copy of it, which does not set the variable), the lock is already held
+# through the inherited descriptor 9; taking it again here would wait forever.
+if [ "$(readlink "/proc/$$/fd/9" 2>/dev/null)" = /run/dueboard-autodeploy.lock ]; then DUEBOARD_DEPLOY_LOCKED=1; fi
+if [ -z "${DUEBOARD_DEPLOY_LOCKED:-}" ]; then
+  exec 9>/run/dueboard-autodeploy.lock
+  flock 9
+  install -d -m 700 "$STATE_DIR"
+  # A manual run on another branch or a pinned commit is kept: auto-deploy leaves it alone until a plain run.
+  if [ "$BRANCH" != main ] || [ -n "${COMMIT:-}" ]; then
+    echo "${COMMIT:-$BRANCH}" > "$STATE_DIR/pinned"
+    echo "Pinned: auto-deploy is paused until setup.sh runs again without BRANCH or COMMIT."
+  else
+    rm -f "$STATE_DIR/pinned"
+  fi
+fi
+
 # 1 GB swap: the smallest plan has only 512 MB RAM.
 if ! swapon --show | grep -q /swapfile; then
   fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
@@ -35,7 +53,8 @@ if ! command -v caddy >/dev/null; then
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update && apt-get install -y caddy
 fi
-apt-get install -y git sqlite3
+# Skipped when present: a held dpkg lock (unattended upgrades) must not fail every deploy.
+dpkg -s git sqlite3 >/dev/null 2>&1 || apt-get install -y git sqlite3
 
 id dueboard >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin dueboard
 install -d -o dueboard -g dueboard -m 750 "$DATA_DIR"
@@ -57,8 +76,9 @@ TELEGRAM_BOT_TOKEN=
 AI_PROVIDER=
 AI_API_KEY=
 ENV
-  chmod 640 "$ENV_FILE" && chgrp dueboard "$ENV_FILE"
 fi
+# Every run, not only the first: the file holds the bot token and the AI key.
+chmod 640 "$ENV_FILE" && chgrp dueboard "$ENV_FILE"
 
 # Caddy: a domain gets automatic HTTPS; without one, serve HTTP on port 80.
 if [ -n "${SITE_ADDRESS:-}" ]; then
