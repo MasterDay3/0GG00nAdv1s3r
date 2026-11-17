@@ -807,3 +807,23 @@ test('cleanup: expired sessions, old AI runs and reminder marks of past deadline
   app.cleanup();
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
 });
+
+test('moodle: a failing sync is shown on the site and announced in Telegram once', async (t) => {
+  let answer = () => new Response('Server error', { status: 500 });
+  const { app, base, sent, close } = await start({ fetchImpl: async () => answer() });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('PUT', '/api/settings', { icsUrl: 'https://moodle.example/cal.ics' });
+  const { code } = (await call('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 5, type: 'private' }, text: `/start ${code}` } });
+  sent.length = 0;
+
+  await app.syncAll();
+  await app.syncAll();
+  assert.match((await call('GET', '/api/me')).data.syncError, /статусом 500/);
+  assert.equal(sent.filter((m) => /Не вдалося оновити/.test(m.text)).length, 1, 'one message, not one per sync');
+
+  answer = () => new Response(FEED);
+  await app.syncAll();
+  assert.equal((await call('GET', '/api/me')).data.syncError, null);
+});

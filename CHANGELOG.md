@@ -22,6 +22,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `api`: A failing Moodle sync is no longer silent: the board and Settings show why, and the Telegram bot tells you once when background sync starts failing.
 - `db`: Hourly cleanup of expired sessions and reset codes, day-old AI run counters and reminder marks of deadlines that are gone or a week past.
 - `ui`: Install Dueboard on a phone as an app (web app manifest, icons, safe areas); a service worker opens the last saved board and exams offline and shows that it is offline. Saved data is cleared on log out.
 - `api`: Storage limit for uploaded files: 100 MB per account across all exams (`STORAGE_MB_PER_USER`); the materials block shows how much is used.

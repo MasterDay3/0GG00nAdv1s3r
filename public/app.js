@@ -525,7 +525,12 @@ async function showBoard() {
     },
   }, 'Оновити з Moodle') : null;
 
+  const syncWarning = me.syncError ? h('div', { class: 'panel warning', role: 'alert' },
+    h('strong', {}, 'Дедлайни з Moodle не оновлюються. '), me.syncError.replace(/[.!]?$/, '. '),
+    h('a', { href: '#/settings' }, 'Перевірити посилання')) : null;
+
   setView(
+    syncWarning,
     h('div', { class: 'board-head' },
       h('div', {},
         h('h1', {}, 'Ваші дедлайни'),
@@ -654,7 +659,8 @@ async function showSettings() {
   h('label', {}, 'Посилання на календар Moodle',
     h('input', { name: 'icsUrl', type: 'text', value: me.icsUrl, placeholder: 'https://moodle.ucu.edu.ua/calendar/export_execute.php?…' })),
   h('div', { class: 'row' },
-    h('span', { class: 'muted small' }, me.lastSyncAt ? `Остання синхронізація: ${fmtDate(me.lastSyncAt)}.` : 'Ще не синхронізовано.'),
+    h('span', { class: 'muted small' }, me.lastSyncAt ? `Остання синхронізація: ${fmtDate(me.lastSyncAt)}.` : 'Ще не синхронізовано.',
+      me.syncError ? h('span', { class: 'sync-error' }, ` Остання спроба не вдалася: ${me.syncError}`) : null),
     h('button', { type: 'submit', class: 'shrink' }, 'Зберегти й оновити')));
 
   const pasteForm = h('form', {

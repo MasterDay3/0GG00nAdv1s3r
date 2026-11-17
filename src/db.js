@@ -112,6 +112,8 @@ export function openDb(path = ':memory:') {
   }
   // Secret link to the board as a calendar feed (stored hashed, like the extension key).
   if (!userColumns.includes('cal_token_hash')) db.exec('ALTER TABLE users ADD COLUMN cal_token_hash TEXT');
+  // Why the last Moodle sync failed (NULL after a good one), so the student sees it instead of a silently stale board.
+  if (!userColumns.includes('sync_error')) db.exec('ALTER TABLE users ADD COLUMN sync_error TEXT');
   // Which questions a diagnostic attempt got wrong (JSON array of ids), for "practise your mistakes".
   const attemptColumns = db.prepare('PRAGMA table_info(attempts)').all().map((c) => c.name);
   if (!attemptColumns.includes('wrong')) db.exec("ALTER TABLE attempts ADD COLUMN wrong TEXT NOT NULL DEFAULT '[]'");

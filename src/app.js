@@ -191,6 +191,7 @@ export function createApp({
       group: group ? { name: group.name, code: group.join_code } : null,
       icsUrl: user.ics_url || '',
       lastSyncAt: user.last_sync_at,
+      syncError: user.ics_url ? user.sync_error || null : null,
       telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id), digest: Boolean(user.tg_digest) },
       extension: { connected: Boolean(user.ext_key_hash) },
       calendarFeed: Boolean(user.cal_token_hash),
@@ -279,6 +280,17 @@ export function createApp({
 
   async function syncMoodle(user) {
     if (!user.ics_url) throw new HttpError(400, 'Спершу додайте посилання на календар Moodle');
+    try {
+      const imported = await downloadMoodle(user);
+      run('UPDATE users SET last_sync_at = ?, sync_error = NULL WHERE id = ?', now(), user.id);
+      return imported;
+    } catch (err) {
+      run('UPDATE users SET sync_error = ? WHERE id = ?', err instanceof HttpError ? err.message : 'Щось пішло не так', user.id);
+      throw err;
+    }
+  }
+
+  async function downloadMoodle(user) {
     let body;
     try {
       const res = await fetchImpl(user.ics_url, { signal: AbortSignal.timeout(15_000), maxBytes: MAX_FEED });
@@ -295,9 +307,7 @@ export function createApp({
     }
     if (body.length > MAX_FEED) throw new HttpError(502, 'Календар завеликий');
     if (!/BEGIN:VCALENDAR/i.test(body)) throw new HttpError(502, 'За цим посиланням немає календаря');
-    const imported = importEvents(user, parseIcs(body), new URL(user.ics_url).origin);
-    run('UPDATE users SET last_sync_at = ? WHERE id = ?', now(), user.id);
-    return imported;
+    return importEvents(user, parseIcs(body), new URL(user.ics_url).origin);
   }
 
   // ---------- prep ----------
@@ -496,7 +506,9 @@ export function createApp({
   }, { auth: false });
 
   route('PUT', '/api/settings', ({ user, body }) => {
-    run('UPDATE users SET ics_url = ? WHERE id = ?', normalizeFeedUrl(body.icsUrl) || null, user.id);
+    const icsUrl = normalizeFeedUrl(body.icsUrl) || null;
+    // A new link starts clean: the old link's error says nothing about it.
+    run('UPDATE users SET ics_url = ?, sync_error = CASE WHEN ics_url IS ? THEN sync_error END WHERE id = ?', icsUrl, icsUrl, user.id);
     return me(one('SELECT * FROM users WHERE id = ?', user.id));
   });
 
@@ -628,7 +640,7 @@ export function createApp({
     if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'Це не календар .ics');
     const origin = user.ics_url ? new URL(user.ics_url).origin : null;
     const imported = importEvents(user, parseIcs(ics), origin);
-    run('UPDATE users SET last_sync_at = ? WHERE id = ?', now(), user.id);
+    run('UPDATE users SET last_sync_at = ?, sync_error = NULL WHERE id = ?', now(), user.id);
     return { imported };
   }, { auth: 'extension', limit: MAX_FEED + 4096 });
 
@@ -1128,6 +1140,10 @@ export function createApp({
         await syncMoodle(user);
       } catch (err) {
         console.error(`Moodle sync for ${user.username} failed:`, err.message);
+        // Tell the student once, when a sync that used to work starts failing, not every 6 hours.
+        if (!user.sync_error && user.tg_chat_id && telegram.enabled) {
+          await sendTo(user, `⚠️ Не вдалося оновити ваші дедлайни з Moodle: ${err.message}\nПеревірте посилання в Dueboard → Налаштування.`);
+        }
       }
     }
   }

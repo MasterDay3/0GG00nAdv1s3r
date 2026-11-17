@@ -415,3 +415,8 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .topbar { padding-top: max(var(--space-xs), env(safe-area-inset-top)); }
 #toast { bottom: max(var(--space-lg), calc(env(safe-area-inset-bottom) + var(--space-sm))); }
 body { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Moodle sync problems */
+.panel.warning { margin-bottom: var(--space-lg); border-color: var(--color-error); background: var(--color-paper-2); }
+.panel.warning strong { color: var(--color-error); }
+.sync-error { color: var(--color-error); }
