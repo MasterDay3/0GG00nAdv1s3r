@@ -6,7 +6,8 @@ import { kindOf, pptxSlides, docxText } from './slides.js';
 export const MODEL = 'claude-opus-5-5';
 export const PROVIDERS = {
   claude: { model: MODEL, label: 'Claude' },
-  gemini: { model: 'gemini-3.8-flash', label: 'Gemini' },
+  // Busy Gemini models answer 503 "high demand"; then the next one in `fallbacks` is tried.
+  gemini: { model: 'gemini-3.8-flash', label: 'Gemini', fallbacks: ['gemini-3-flash-preview', 'gemini-2.5-flash'] },
   deepseek: { model: 'deepseek-flash', label: 'DeepSeek' },
 };
 export const PER_TOPIC = { min: 3, max: 5 };
@@ -122,13 +123,13 @@ export function cleanQuestions(raw, topics, slideCount) {
 }
 
 // AI_PROVIDER (claude | gemini | deepseek), AI_API_KEY, optional AI_MODEL. Without AI_PROVIDER the key's
-// shape decides: "sk-ant-…" is Claude, "AIza…" is Gemini, any other key is DeepSeek. ANTHROPIC_API_KEY still works.
+// shape decides: "sk-ant-…" is Claude, "AIza…" or "AQ.…" is Gemini, any other key is DeepSeek. ANTHROPIC_API_KEY still works.
 export function aiConfigFromEnv(env) {
   const apiKey = env.AI_API_KEY || env.ANTHROPIC_API_KEY || '';
   let provider = (env.AI_PROVIDER || '').toLowerCase();
   if (!provider) {
     if (!env.AI_API_KEY || apiKey.startsWith('sk-ant-')) provider = 'claude';
-    else provider = apiKey.startsWith('AIza') ? 'gemini' : 'deepseek';
+    else provider = /^(AIza|AQ\.)/.test(apiKey) ? 'gemini' : 'deepseek';
   }
   if (!PROVIDERS[provider]) throw new Error(`AI_PROVIDER must be one of: ${Object.keys(PROVIDERS).join(', ')}`);
   return { provider, apiKey, model: env.AI_MODEL || undefined };
@@ -141,12 +142,13 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
   model ||= PROVIDERS[provider].model;
   const label = PROVIDERS[provider].label;
 
-  async function post(url, headers, body) {
+  async function post(url, headers, body, { busyOk = false } = {}) {
     const res = await fetchImpl(url, {
       method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT),
     });
     const data = await res.json().catch(() => null);
+    if (busyOk && [429, 503].includes(res.status)) return null;
     if (!res.ok) {
       console.error(`${label} API ${res.status}:`, data?.error?.message || JSON.stringify(data?.error || data)?.slice(0, 300) || 'no details');
       if ([429, 503, 529].includes(res.status)) throw new HttpError(503, `${label} is busy right now. Try again in a minute.`);
@@ -183,17 +185,23 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
       const input = blocks.map((b) => (b.type === 'document'
         ? { type: 'document', data: b.source.data, mime_type: 'application/pdf' }
         : { type: 'text', text: b.text }));
-      const data = await post('https://generativelanguage.googleapis.com/v1beta/interactions', {
-        'x-goog-api-key': apiKey,
-        'Api-Revision': '2026-05-20',
-      }, {
-        model,
-        system_instruction: SYSTEM,
-        input: [...input, { type: 'text', text: task }],
-        response_format: { type: 'text', mime_type: 'application/json', schema: SCHEMA },
-        generation_config: { max_output_tokens: 16000 },
-        store: false,
-      });
+      const models = [model, ...PROVIDERS.gemini.fallbacks.filter((m) => m !== model)];
+      let data = null;
+      for (const [i, m] of models.entries()) {
+        data = await post('https://generativelanguage.googleapis.com/v1beta/interactions', {
+          'x-goog-api-key': apiKey,
+          'Api-Revision': '2026-05-20',
+        }, {
+          model: m,
+          system_instruction: SYSTEM,
+          input: [...input, { type: 'text', text: task }],
+          response_format: { type: 'text', mime_type: 'application/json', schema: SCHEMA },
+          generation_config: { max_output_tokens: 16000 },
+          store: false,
+        }, { busyOk: i < models.length - 1 });
+        if (data) break;
+        console.error(`Gemini ${m} is busy, trying ${models[i + 1]}`);
+      }
       if (data.status === 'incomplete') throw cutOff();
       if (data.status !== 'completed') throw declined();
       return (data.steps || []).filter((st) => st.type === 'model_output')

@@ -253,6 +253,7 @@ test('ai: provider comes from AI_PROVIDER or the shape of the key', () => {
   assert.deepEqual(aiConfigFromEnv({ ANTHROPIC_API_KEY: 'sk-ant-1' }), { provider: 'claude', apiKey: 'sk-ant-1', model: undefined });
   assert.equal(aiConfigFromEnv({ AI_API_KEY: 'sk-ant-api03-x' }).provider, 'claude');
   assert.equal(aiConfigFromEnv({ AI_API_KEY: 'AIzaSyX' }).provider, 'gemini');
+  assert.equal(aiConfigFromEnv({ AI_API_KEY: 'AQ.Ab8x' }).provider, 'gemini');
   assert.equal(aiConfigFromEnv({ AI_API_KEY: 'sk-0123abc' }).provider, 'deepseek');
   assert.deepEqual(aiConfigFromEnv({ AI_PROVIDER: 'Gemini', AI_API_KEY: 'k', AI_MODEL: 'gemini-4-hydrogen' }),
     { provider: 'gemini', apiKey: 'k', model: 'gemini-4-hydrogen' });
@@ -268,6 +269,7 @@ test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
   const requests = [];
   const fetchImpl = async (url, init) => {
     requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    if (requests.length === 1) return Response.json({ error: { message: 'high demand', code: 'service_unavailable' } }, { status: 503 });
     return Response.json({ id: 'int_1', status: 'completed', steps: [
       { type: 'thought', summary: [] },
       { type: 'model_output', content: [{ type: 'text', text: ONE_QUESTION(ids.topic, ids.material) }] },
@@ -283,6 +285,7 @@ test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
   const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(r.status, 200);
   assert.equal(r.data.added, 1);
+  assert.deepEqual(requests.map((q) => q.body.model), ['gemini-3.8-flash', 'gemini-3-flash-preview'], 'a busy model falls back');
   const [req] = requests;
   assert.equal(req.url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
   assert.equal(req.headers['x-goog-api-key'], 'AIza-test');
