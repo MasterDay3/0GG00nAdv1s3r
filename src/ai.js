@@ -111,7 +111,8 @@ export function cleanQuestions(raw, topics, slideCount) {
     if (options.length < 2 || options.length > 6 || options.some((o) => !o || o.length > 300)) continue;
     if (new Set(options).size !== options.length) continue;
     if (!Number.isInteger(q.answer_index) || q.answer_index < 0 || q.answer_index >= options.length) continue;
-    const slide = Number.isInteger(q.slide) ? q.slide : 0;
+    // A file without slides (DOCX, TXT, MD) has no slide numbers to point at, even if its headings say "Slide 2".
+    const slide = Number.isInteger(q.slide) && slideCount.get(q.material_id) !== 0 ? q.slide : 0;
     if (slide < 0 || slide > slideCount.get(q.material_id)) continue;
     const count = perTopic.get(q.topic_id) || 0;
     if (count >= PER_TOPIC.max) continue;

@@ -118,6 +118,11 @@ test('ai: clean questions drops malformed ones and caps each topic at 5', () => 
     topicId: 7, prompt: 'A loop inside a loop over 1000 items runs how many times?', options: ['1000', '1 000 000', '2000'],
     answerIndex: 1, materialId: 1, slide: 2, quote: 'Nested loops take O(n²)',
   });
+  assert.deepEqual(
+    cleanQuestions([{ topic_id: 1, prompt: 'Q', options: ['a', 'b'], answer_index: 0, material_id: 9, slide: 2, quote: '' }], [{ id: 1 }], new Map([[9, 0]]))
+      .map((q) => q.slide),
+    [0], 'notes without slides keep the question, with slide 0',
+  );
   assert.deepEqual(cleanQuestions('nonsense', [], slideCount), []);
 });
 
