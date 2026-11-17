@@ -393,7 +393,7 @@ export function createApp({
     const ip = clientIp(req);
     guard(res, [limits.registerIp, ip]);
     const username = text(body.username, 'Логін', { max: 32 });
-    if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Логін: 3–32 латинські літери, цифри або _');
+    if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Логін: від 3 до 32 латинських літер, цифр або _');
     const password = newPassword(body.password);
     if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'Цей логін уже зайнятий');
     limits.registerIp.hit(ip);
@@ -793,7 +793,7 @@ export function createApp({
   function questionFields(body) {
     const prompt = text(body.prompt, 'Питання', { max: 1000 });
     if (!Array.isArray(body.options) || body.options.length < 2 || body.options.length > 6) {
-      throw new HttpError(400, 'Питанню потрібно 2–6 варіантів відповіді');
+      throw new HttpError(400, 'Питанню потрібно від 2 до 6 варіантів відповіді');
     }
     const options = body.options.map((o, i) => text(o, `Варіант ${i + 1}`, { max: 300 }));
     if (!Number.isInteger(body.answerIndex) || body.answerIndex < 0 || body.answerIndex >= options.length) {
@@ -958,7 +958,7 @@ export function createApp({
     const exam = ownExam(user, params.id);
     const count = body.count === undefined ? COUNT.default : body.count;
     if (!Number.isInteger(count) || count < COUNT.min || count > COUNT.max) {
-      throw new HttpError(400, `За раз можна згенерувати ${COUNT.min}–${COUNT.max} питань`);
+      throw new HttpError(400, `За раз можна згенерувати від ${COUNT.min} до ${COUNT.max} питань`);
     }
     const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
     const materials = all('SELECT id, filename, data FROM materials WHERE exam_id = ? ORDER BY id', exam.id);

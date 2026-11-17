@@ -1,7 +1,8 @@
-/* Hallmark · shape: app screen · genre: modern-minimal · theme: Furrow (deal 3/3, seed student-deadline-board-exam-88f7·25e6f75f·2026-11-16·r0) · redesign: full
- * nav: kept top bar, wordmark and three links · signature: the deadline ledger ruled by day, the next one open as a notebook card · states: empty, error (toast, auth alert), disabled while syncing
- * axes: light/grotesk-sans/warm · posture: committed · contrast: pass · v2.0.0 */
-/* Hallmark · pre-emit critique: P4 H4 E4 S4 R3 V4 · weakest: R, the prep and settings screens share one panel recipe; the board carries the identity */
+/* Hallmark · checked: 2026-11-17 · genre: modern-minimal · shape: app screen
+ * floor: 0 FAIL · fixed: 10 (10a, 39a, 3, 19, 63, 30a, 16, 64, 49a, F4) · structural: none printed
+ * built: Hallmark · theme: Furrow · nav: kept top bar, wordmark and four links · signature: the deadline ledger ruled by day, the next one open as a notebook card · redesign: polish · v2.0.0 */
+/* Hallmark · dismissed 40 · the dark block swaps error-soft to a dark fill under light ink, checked in the dark render; the linter paired the light fill with the dark-mode ink */
+/* Hallmark · answered F4 · the right and wrong quiz options are answer feedback fills, not buttons a student presses next; one filled primary per screen otherwise */
 @import url("./tokens.css");
 @import url("./base.css");
 
@@ -260,7 +261,7 @@ a.title:hover { text-decoration-color: var(--color-ink); }
 .quiz-tally .ok { color: var(--color-green); }
 .quiz-tally .bad { color: var(--color-error); }
 .bar { height: 6px; border-radius: 3px; background: var(--color-paper-3); overflow: hidden; }
-.bar > span { display: block; height: 100%; border-radius: inherit; background: var(--color-accent); transition: width var(--dur-long) var(--ease-out); }
+.bar > span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--color-accent); transform-origin: left center; transition: transform var(--dur-long) var(--ease-out); }
 .bar.good > span { background: var(--color-green); }
 .bar.weak > span { background: var(--color-error); }
 .quiz-progress { margin: var(--space-xs) 0 var(--space-md); }
@@ -277,7 +278,7 @@ button.quiz-opt {
   transition: border-color var(--dur-micro) var(--ease-out), background-color var(--dur-micro) var(--ease-out);
 }
 button.quiz-opt:hover:not(:disabled) { border-color: var(--color-ink); background: var(--color-paper-3); }
-button.quiz-opt:disabled { cursor: default; opacity: 1; }
+button.quiz-opt:disabled { cursor: not-allowed; opacity: 1; color: var(--color-ink-2); }
 .quiz-opt .letter {
   flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
   font-family: var(--font-outlier); font-size: var(--text-sm); border: var(--rule-hair) solid var(--color-rule); color: var(--color-muted);
@@ -288,7 +289,7 @@ button.quiz-opt.right .letter { background: var(--color-green); border-color: va
 button.quiz-opt.wrong { border-color: var(--color-error); background: var(--color-error-soft); }
 button.quiz-opt.wrong .letter { background: var(--color-error); border-color: var(--color-error); color: var(--color-paper-2); }
 button.quiz-opt.dim { opacity: 0.55; }
-.quiz-feedback { width: 100%; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-pill); border-left: 3px solid; }
+.quiz-feedback { width: 100%; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-card); border: var(--rule-hair) solid; }
 .quiz-feedback.ok { border-color: var(--color-green); background: var(--color-green-soft); }
 .quiz-feedback.bad { border-color: var(--color-error); background: var(--color-error-soft); }
 .quiz-hint { margin: var(--space-xs) 0 0; font-size: var(--text-sm); color: var(--color-ink-2); }
@@ -307,6 +308,7 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .plan th { text-align: left; font-weight: 500; color: var(--color-muted); padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-ink); white-space: nowrap; }
 .plan td { text-align: left; padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); vertical-align: top; }
 .plan td:first-child { font-family: var(--font-outlier); white-space: nowrap; }
+.progress-topics td:first-child { font-family: var(--font-body); white-space: normal; }
 .plan tr.today td { background: var(--color-accent-soft); }
 .files { list-style: none; padding: 0; margin: 0 0 var(--space-sm); border-top: var(--rule-hair) solid var(--color-ink); }
 .files li { display: flex; justify-content: space-between; align-items: center; gap: var(--space-sm); padding: var(--space-xs) 0; border-bottom: var(--rule-hair) solid var(--color-rule); }
@@ -358,6 +360,9 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 }
 @media (max-width: 36rem) {
   nav a, button.link { padding: 0 var(--space-xs); }
+  /* Four destinations on one row on a phone: the full width, a step smaller, never wrapping. */
+  #nav { width: 100%; flex-wrap: nowrap; justify-content: space-between; gap: 0; }
+  #nav a, #nav .link { padding: 0 var(--space-2xs); font-size: var(--text-sm); white-space: nowrap; }
   .item { grid-template-columns: minmax(0, 1fr) auto; }
   .due { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-xs); }
   .note { grid-column: 1 / -1; }
@@ -424,3 +429,16 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 /* Telegram reminder times */
 .reminder-choice { border: 0; margin: var(--space-sm) 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); }
 .reminder-choice legend { padding: 0; margin-bottom: var(--space-2xs); width: 100%; }
+
+/* File picker in Ukrainian: the native input stays (hidden) for the form and the keyboard */
+.file-pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs) var(--space-sm); flex: 1 1 auto; min-width: 0; cursor: pointer; color: var(--color-ink); font-weight: 400; }
+.file-button {
+  display: inline-flex; align-items: center; min-height: var(--control); padding: 0 var(--space-md); border-radius: var(--radius-pill);
+  font-weight: 500; color: var(--color-ink); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-rule);
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+.file-pick:hover .file-button { background: var(--color-paper-3); }
+.file-pick:active .file-button { background: var(--color-rule); }
+.file-pick:focus-within .file-button { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.file-chosen { min-width: 0; overflow-wrap: anywhere; }
+.field-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); margin-bottom: var(--space-2xs); }

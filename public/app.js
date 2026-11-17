@@ -221,7 +221,7 @@ function showAuth() {
 function showReset(username = '') {
   const error = h('p', { class: 'small', role: 'alert' });
   const fail = (err) => { error.textContent = err.message; };
-  const back = h('button', { type: 'button', class: 'link small', onclick: showAuth }, '← Назад до входу');
+  const back = h('button', { type: 'button', class: 'link small', onclick: showAuth }, 'Назад до входу');
   const panel = h('div', { class: 'panel' });
 
   const askForm = h('form', {
@@ -316,7 +316,7 @@ function deadlineRow(item, now, reload) {
         type: 'button', class: 'secondary small', 'aria-pressed': String(item.done),
         title: item.done ? 'Повернути на дошку' : 'Позначити виконаним: дедлайн зникне з дошки й більше не нагадуватиме',
         onclick: async () => {
-          if (await act(() => api('PUT', '/api/done', { key: item.key, done: !item.done }), item.done ? 'Знову на дошці' : 'Виконано ✅')) reload();
+          if (await act(() => api('PUT', '/api/done', { key: item.key, done: !item.done }))) reload();
         },
       }, item.done ? 'Повернути' : 'Виконано') : null,
       item.canDelete ? h('button', {
@@ -332,7 +332,7 @@ function deadlineRow(item, now, reload) {
         type: 'button', class: 'danger small',
         onclick: async () => {
           if (!confirm(`Видалити «${item.title}»?`)) return;
-          if (await act(() => api('DELETE', `/api/deadlines/${item.id}`), 'Видалено')) reload();
+          if (await act(() => api('DELETE', `/api/deadlines/${item.id}`))) reload();
         },
       }, 'Видалити') : null),
     noteEditor(item));
@@ -347,7 +347,7 @@ function deadlineEditForm(item, reload) {
       const f = formData(form);
       const ok = await act(() => api('PUT', `/api/deadlines/${item.id}`, {
         title: f.title, course: f.course, url: f.url, dueAt: parseLocalInput(f.dueAt),
-      }), 'Збережено');
+      }));
       if (ok) reload();
     },
   },
@@ -406,7 +406,7 @@ function addDeadlineForm(reload) {
       const f = formData(form);
       const ok = await act(() => api('POST', '/api/deadlines', {
         title: f.title, course: f.course, url: f.url, dueAt: parseLocalInput(f.dueAt), shared: f.shared === 'on',
-      }), f.shared === 'on' ? 'Додано для всієї групи' : 'Дедлайн додано');
+      }));
       if (ok) reload();
     },
   },
@@ -476,7 +476,7 @@ async function showBoard() {
       empty = h('div', { class: 'panel empty' }, h('p', {}, doneShown.length ? 'Серед відкритих дедлайнів нічого не знайдено.' : 'Нічого не знайдено.'));
     } else if (!list.length) {
       empty = h('div', { class: 'panel empty' },
-        h('p', {}, doneItems.length ? 'Усе зроблено. На дошці порожньо 🎉' : 'Дедлайнів поки немає.'),
+        h('p', {}, doneItems.length ? 'Усе зроблено. На дошці порожньо.' : 'Дедлайнів поки немає.'),
         doneItems.length ? null : h('p', {}, h('a', { href: '#/settings' }, 'Під’єднайте календар Moodle'), ' або додайте дедлайн вище.'));
     }
 
@@ -632,7 +632,7 @@ function extensionCard() {
       h('button', {
         type: 'button', class: 'secondary shrink',
         onclick: async () => {
-          if (await act(() => api('DELETE', '/api/extension/key'), 'Розширення від’єднано')) render();
+          if (await act(() => api('DELETE', '/api/extension/key'))) render();
         },
       }, 'Від’єднати')),
   ];
@@ -669,10 +669,10 @@ async function showSettings() {
       const file = pasteForm.file.files[0];
       const ics = file ? await file.text() : pasteForm.ics.value;
       const r = await act(() => api('POST', '/api/import-ics', { ics }));
-      if (r) { toast(`Імпортовано подій: ${r.imported}`); pasteForm.reset(); }
+      if (r) { toast(`Імпортовано подій: ${r.imported}`); pasteForm.reset(); pasteForm.file.dispatchEvent(new Event('change')); }
     },
   },
-  h('label', {}, 'Файл .ics', h('input', { name: 'file', type: 'file', accept: '.ics,text/calendar' })),
+  h('div', {}, h('span', { class: 'field-label' }, 'Файл .ics'), filePicker(h('input', { name: 'file', type: 'file', accept: '.ics,text/calendar' }))),
   h('label', {}, '…або вставте його вміст', h('textarea', { name: 'ics', placeholder: 'BEGIN:VCALENDAR…' })),
   h('button', { type: 'submit' }, 'Імпортувати'));
 
@@ -689,7 +689,7 @@ async function showSettings() {
         type: 'button', class: 'secondary',
         onclick: async () => {
           if (!confirm('Вийти з групи? Ви перестанете бачити її спільні дедлайни.')) return;
-          if (await act(() => api('POST', '/api/group/leave', {}), 'Ви вийшли з групи')) render();
+          if (await act(() => api('POST', '/api/group/leave', {}))) render();
         },
       }, 'Вийти з групи'))
     : h('div', {},
@@ -697,14 +697,14 @@ async function showSettings() {
         class: 'row',
         onsubmit: async (e) => {
           e.preventDefault();
-          if (await act(() => api('POST', '/api/group/join', formData(e.target)), 'Ви приєдналися до групи')) render();
+          if (await act(() => api('POST', '/api/group/join', formData(e.target)))) render();
         },
-      }, h('label', {}, 'Приєднатися за кодом', h('input', { name: 'code', required: true, maxlength: 16 })), h('button', { type: 'submit', class: 'shrink' }, 'Приєднатися')),
+      }, h('label', {}, 'Приєднатися за кодом', h('input', { name: 'code', required: true, maxlength: 16 })), h('button', { type: 'submit', class: 'secondary shrink' }, 'Приєднатися')),
       h('form', {
         class: 'row',
         onsubmit: async (e) => {
           e.preventDefault();
-          if (await act(() => api('POST', '/api/group', formData(e.target)), 'Групу створено')) render();
+          if (await act(() => api('POST', '/api/group', formData(e.target)))) render();
         },
       }, h('label', {}, '…або створіть свою', h('input', { name: 'name', required: true, maxlength: 80, placeholder: 'напр. КН-2, 2 курс' })), h('button', { type: 'submit', class: 'shrink secondary' }, 'Створити')));
 
@@ -714,15 +714,15 @@ async function showSettings() {
   const tgBox = h('div', {});
   const renderTelegram = () => {
     if (!me.telegram.enabled) {
-      tgBox.replaceChildren(h('p', { class: 'muted' }, 'Telegram-бот на цьому сервері вимкнений. Щоб увімкнути нагадування, запустіть сервер із TELEGRAM_BOT_TOKEN.'));
+      tgBox.replaceChildren(h('p', { class: 'muted small' }, 'Telegram-бот на цьому сервері вимкнений. Щоб увімкнути нагадування, запустіть сервер із TELEGRAM_BOT_TOKEN.'));
     } else if (me.telegram.linked) {
       tgBox.replaceChildren(
         h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Бот нагадує про кожен дедлайн, а зранку надсилає дайджест: що здавати цього тижня і що вчити сьогодні.'),
         reminderChoice(),
-        h('p', { class: 'muted' }, 'У боті: /deadlines — список дедлайнів, /digest — увімкнути чи вимкнути дайджест, /stop — відв’язати чат.'),
+        h('p', { class: 'muted' }, 'Команди бота: /deadlines показує дедлайни, /digest вмикає чи вимикає дайджест, /stop відв’язує чат.'),
         h('button', {
           type: 'button', class: 'secondary',
-          onclick: async () => { if (await act(() => api('DELETE', '/api/telegram'), 'Telegram відв’язано')) render(); },
+          onclick: async () => { if (await act(() => api('DELETE', '/api/telegram'))) render(); },
         }, 'Відв’язати'));
     } else {
       tgBox.replaceChildren(
@@ -787,7 +787,7 @@ function calendarCard() {
   };
   const turnOff = async () => {
     if (!confirm('Вимкнути посилання? Календарі, підписані на нього, перестануть оновлюватися.')) return;
-    if (await act(() => api('DELETE', '/api/calendar-feed'), 'Посилання вимкнено')) { me.calendarFeed = false; draw(); }
+    if (await act(() => api('DELETE', '/api/calendar-feed'))) { me.calendarFeed = false; draw(); }
   };
 
   function showLink(url) {
@@ -855,7 +855,7 @@ function accountCard() {
   return [
     h('p', { class: 'small' },
       h('a', { href: '/api/export', download: '' }, 'Завантажити всі мої дані'),
-      h('span', { class: 'muted' }, ' — дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
+      h('span', { class: 'muted' }, ': дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
     h('details', {}, h('summary', {}, 'Змінити пароль'), passwordForm),
     h('details', {},
       h('summary', {}, 'Вийти на всіх пристроях'),
@@ -891,7 +891,7 @@ async function showPrep() {
   setView(
     h('div', { class: 'page-head' },
       h('h1', {}, 'Підготовка до екзаменів'),
-      h('p', { class: 'muted' }, 'Додайте екзамен, його теми й кілька питань. Діагностичний тест покаже слабкі теми і складе план по днях аж до екзамену. Лише для тренування — не для оцінюваних тестів у Moodle.')),
+      h('p', { class: 'muted' }, 'Додайте екзамен, його теми й кілька питань. Діагностичний тест покаже слабкі теми і складе план по днях аж до екзамену. Лише для тренування, не для оцінюваних тестів у Moodle.')),
     exams.length
       ? h('ul', { class: 'exam-list' }, exams.map((ex) => h('li', {}, h('a', { class: 'exam-link', href: `#/prep/${ex.id}` },
         h('span', { class: 'num' }, fmtDate(ex.examAt)),
@@ -908,13 +908,13 @@ function questionForm(topic, reload) {
       e.preventDefault();
       const options = form.options.value.split('\n').map((s) => s.trim()).filter(Boolean);
       const answerIndex = Number(form.correct.value) - 1;
-      const ok = await act(() => api('POST', `/api/topics/${topic.id}/questions`, { prompt: form.prompt.value, options, answerIndex }), 'Питання додано');
+      const ok = await act(() => api('POST', `/api/topics/${topic.id}/questions`, { prompt: form.prompt.value, options, answerIndex }));
       if (ok) reload();
     },
   },
   h('label', {}, 'Питання', h('textarea', { name: 'prompt', required: true, maxlength: 1000 })),
   h('div', { class: 'row' },
-    h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (2–6)', h('textarea', { name: 'options', required: true })),
+    h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (від 2 до 6)', h('textarea', { name: 'options', required: true })),
     h('label', {}, '№ правильного', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: '1', required: true }))),
   h('button', { type: 'submit' }, 'Додати питання'));
   return h('details', {}, h('summary', {}, 'Додати питання'), form);
@@ -924,7 +924,7 @@ function problemForm(topic, reload) {
   const form = h('form', {
     onsubmit: async (e) => {
       e.preventDefault();
-      if (await act(() => api('POST', `/api/topics/${topic.id}/problems`, { text: form.text.value }), 'Задачу додано')) reload();
+      if (await act(() => api('POST', `/api/topics/${topic.id}/problems`, { text: form.text.value }))) reload();
     },
   },
   h('label', {}, 'Задача', h('textarea', { name: 'text', required: true, maxlength: 4000 })),
@@ -947,11 +947,11 @@ function editButton(makeForm) {
 function topicBlock(topic, reload, topics) {
   const del = (path, what) => async () => {
     if (!confirm(`Видалити ${what}?`)) return;
-    if (await act(() => api('DELETE', path), 'Видалено')) reload();
+    if (await act(() => api('DELETE', path))) reload();
   };
   const save = (path, body) => async (e) => {
     e.preventDefault();
-    if (await act(() => api('PUT', path, body(formData(e.target))), 'Збережено')) reload();
+    if (await act(() => api('PUT', path, body(formData(e.target))))) reload();
   };
 
   const renameForm = () => h('form', { class: 'edit-form', onsubmit: save(`/api/topics/${topic.id}`, (f) => ({ name: f.name })) },
@@ -969,7 +969,7 @@ function topicBlock(topic, reload, topics) {
   },
   h('label', {}, 'Питання', h('textarea', { name: 'prompt', required: true, maxlength: 1000 }, q.prompt)),
   h('div', { class: 'row' },
-    h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (2–6)', h('textarea', { name: 'options', required: true }, q.options.join('\n'))),
+    h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (від 2 до 6)', h('textarea', { name: 'options', required: true }, q.options.join('\n'))),
     h('label', {}, '№ правильного', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: String(q.answerIndex + 1), required: true }))),
   h('label', {}, 'Тема', h('select', { name: 'topicId' },
     topics.map((t) => h('option', { value: String(t.id), selected: t.id === topic.id }, t.name)))),
@@ -1014,7 +1014,7 @@ function sourceLine(q) {
   return h('p', { class: 'source muted small' },
     h('span', { class: 'tag' }, 'AI'), ' Джерело: ',
     materialId ? h('a', { href: `/api/materials/${materialId}` }, where) : where,
-    quote ? ` — “${quote}”` : '');
+    quote ? `: «${quote}»` : '');
 }
 
 function aiBlock(exam, reload) {
@@ -1053,6 +1053,17 @@ function aiBlock(exam, reload) {
     h('p', { class: 'muted small' }, hint));
 }
 
+// The native file input shows the browser's own language ("Choose files"); this wraps it in a Ukrainian label.
+function filePicker(input, label = 'Вибрати файл') {
+  input.classList.add('visually-hidden');
+  const chosen = h('span', { class: 'muted small file-chosen' }, 'Файл не вибрано');
+  input.addEventListener('change', () => {
+    const names = [...input.files].map((f) => f.name);
+    chosen.textContent = names.length ? names.join(', ') : 'Файл не вибрано';
+  });
+  return h('label', { class: 'file-pick' }, input, h('span', { class: 'file-button' }, label), chosen);
+}
+
 function readAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1074,14 +1085,14 @@ function materialsBlock(exam, reload) {
             type: 'button', class: 'danger small',
             onclick: async () => {
               if (!confirm(`Видалити ${m.filename}?`)) return;
-              if (await act(() => api('DELETE', `/api/materials/${m.id}`), 'Видалено')) reload();
+              if (await act(() => api('DELETE', `/api/materials/${m.id}`))) reload();
             },
           }, 'Видалити')))))
       : h('p', { class: 'muted' }, 'Тримайте слайди й задачники поруч з екзаменом (до 10 МБ на файл).'),
       exam.storage ? h('div', { class: 'storage' },
         h('p', { class: 'muted small' }, `Зайнято ${fmtSize(exam.storage.used)} з ${fmtSize(exam.storage.limit)} на всі ваші екзамени.`),
         bar(exam.storage.used / exam.storage.limit, exam.storage.used / exam.storage.limit > 0.9 ? 'weak' : '')) : null,
-    h('div', { class: 'row' }, input, h('button', {
+    h('div', { class: 'row' }, filePicker(input, 'Вибрати файли'), h('button', {
       type: 'button', class: 'secondary shrink',
       onclick: async (e) => {
         if (!input.files.length) return toast('Спершу виберіть файл', true);
@@ -1115,7 +1126,7 @@ function resultBlock(exam) {
             h('strong', {}, r.name),
             problems.length
               ? problems.map((p) => h('div', { class: 'q pre' }, p.text))
-              : h('p', { class: 'muted small' }, 'Задач до цієї теми ще немає — додайте їх вище.'));
+              : h('p', { class: 'muted small' }, 'Задач до цієї теми ще немає. Додайте їх вище.'));
         }))
       : h('p', { class: 'spaced' }, 'Слабких тем немає. Просто повторюйте.'));
 }
@@ -1132,7 +1143,7 @@ function historyBlock(exam) {
     return t ? Math.round((t.correct / t.total) * 100) : null;
   };
   const delta = (from, to) => {
-    if (from === null || to === null) return '—';
+    if (from === null || to === null) return 'немає';
     const d = to - from;
     return d > 0 ? `+${d}` : String(d);
   };
@@ -1156,7 +1167,7 @@ function historyBlock(exam) {
         const d = delta(a, b);
         return h('tr', {},
           h('td', {}, t.name),
-          h('td', { class: 'num' }, a === null ? '—' : `${a}%`),
+          h('td', { class: 'num' }, a === null ? 'немає' : `${a}%`),
           h('td', { class: 'num' }, `${b}%`),
           h('td', { class: `num ${d.startsWith('+') ? 'up' : d.startsWith('-') ? 'down' : ''}` }, d));
       }))));
@@ -1187,7 +1198,7 @@ async function showExam(id) {
     class: 'row',
     onsubmit: async (e) => {
       e.preventDefault();
-      if (await act(() => api('POST', `/api/exams/${id}/topics`, { name: e.target.name.value }), 'Тему додано')) reload();
+      if (await act(() => api('POST', `/api/exams/${id}/topics`, { name: e.target.name.value }))) reload();
     },
   }, h('label', { class: 'grow' }, 'Нова тема', h('input', { name: 'name', required: true, maxlength: 120, placeholder: 'напр. Границі' })),
   h('button', { type: 'submit', class: 'secondary shrink' }, 'Додати тему'));
@@ -1201,26 +1212,26 @@ async function showExam(id) {
         h('div', { class: 'exam-meta' },
           h('time', { class: 'num', datetime: new Date(exam.examAt).toISOString() }, fmtDate(exam.examAt)),
           h('span', { class: 'chip amber' }, relative(exam.examAt)))),
-      h('div', { class: 'tools' }, h('button', {
-        type: 'button', class: 'danger',
-        onclick: async () => {
-          if (!confirm(`Видалити екзамен «${exam.title}» з усіма темами й файлами?`)) return;
-          if (await act(() => api('DELETE', `/api/exams/${id}`), 'Екзамен видалено')) location.hash = '#/prep';
-        },
-      }, 'Видалити екзамен'),
-      editButton(() => h('form', {
+      h('div', { class: 'tools' }, 
+        editButton(() => h('form', {
         class: 'edit-form grow',
         onsubmit: async (e) => {
           e.preventDefault();
           const f = formData(e.target);
-          if (await act(() => api('PUT', `/api/exams/${id}`, { title: f.title, course: f.course, examAt: parseLocalInput(f.examAt) }), 'Збережено')) reload();
+          if (await act(() => api('PUT', `/api/exams/${id}`, { title: f.title, course: f.course, examAt: parseLocalInput(f.examAt) }))) reload();
         },
       },
       h('div', { class: 'row' },
         h('label', { class: 'grow' }, 'Екзамен', h('input', { name: 'title', required: true, maxlength: 200, value: exam.title })),
         h('label', {}, 'Курс', h('input', { name: 'course', maxlength: 100, value: exam.course }))),
-      h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true, value: localInputValue(exam.examAt) })),
-      saveCancel(reload))))),
+      h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true, value: localInputValue(exam.examAt) })),saveCancel(reload))),
+        h('button', {
+        type: 'button', class: 'danger',
+        onclick: async () => {
+          if (!confirm(`Видалити екзамен «${exam.title}» з усіма темами й файлами?`)) return;
+          if (await act(() => api('DELETE', `/api/exams/${id}`))) location.hash = '#/prep';
+        },
+      }, 'Видалити екзамен'))),
     h('section', { class: 'panel' },
       h('div', { class: 'head' },
         h('h2', {}, 'Діагностичний тест'),
@@ -1257,7 +1268,7 @@ function shuffled(list) {
 // A bar whose fill is set through the style property (inline style attributes are blocked by the CSP).
 function bar(fraction, cls = '') {
   const fill = h('span', {});
-  fill.style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+  fill.style.transform = `scaleX(${Math.max(0, Math.min(1, fraction)).toFixed(3)})`;
   return h('div', { class: `bar ${cls}` }, fill);
 }
 
@@ -1280,7 +1291,7 @@ function optionButton(q, i, chosen, onPick) {
 function sourceHint(source) {
   if (!source) return null;
   const where = `${source.filename}${source.slide ? `, слайд ${source.slide}` : ''}`;
-  return h('p', { class: 'quiz-hint' }, h('span', { class: 'tag' }, 'З ваших слайдів'), ` ${where}`, source.quote ? ` — “${source.quote}”` : '');
+  return h('p', { class: 'quiz-hint' }, h('span', { class: 'tag' }, 'З ваших слайдів'), ` ${where}`, source.quote ? `: «${source.quote}»` : '');
 }
 
 // The diagnostic test, one question at a time with instant feedback. Scored on the server at the end.
@@ -1345,15 +1356,15 @@ async function showTest(exam, only = null) {
         answered
           ? h('div', { class: `quiz-feedback ${chosen === q.answerIndex ? 'ok' : 'bad'}`, role: 'status' },
             h('strong', {}, chosen === q.answerIndex ? 'Правильно!' : 'Не зовсім.'),
-            chosen === q.answerIndex ? null : ` Правильна відповідь — ${LETTERS[q.answerIndex]}: ${q.options[q.answerIndex]}`,
+            chosen === q.answerIndex ? null : ` Правильна відповідь ${LETTERS[q.answerIndex]}: ${q.options[q.answerIndex]}`,
             sourceHint(q.source))
-          : h('p', { class: 'muted small quiz-keys' }, 'Виберіть відповідь або натисніть 1–', String(q.options.length), '.')),
+          : h('p', { class: 'muted small quiz-keys' }, 'Виберіть відповідь або натисніть клавішу від 1 до ', String(q.options.length), '.')),
       h('div', { class: 'quiz-actions' },
         h('button', {
           type: 'button', class: 'link',
           onclick: () => { if (!answeredCount() || confirm('Вийти з тесту? Відповіді не збережуться.')) backToExam(); },
         }, 'Вийти'),
-        answered ? h('button', { type: 'button', class: 'quiz-next', onclick: next }, last ? 'Результати' : 'Наступне питання →') : null));
+        answered ? h('button', { type: 'button', class: 'quiz-next', onclick: next }, last ? 'Результати' : 'Наступне питання') : null));
   }
 
   async function finish() {
@@ -1375,7 +1386,7 @@ async function showTest(exam, only = null) {
         topics.filter((t) => t.total).map((t) => h('div', { class: 'quiz-topic' },
           h('div', { class: 'quiz-topic-head' },
             h('span', {}, t.name),
-            h('span', { class: `chip ${t.status}` }, `${t.correct}/${t.total} · ${STATUS[t.status]}`)),
+            h('span', { class: `chip ${t.status}` }, `${t.correct} з ${t.total}, ${STATUS[t.status]}`)),
           bar(t.correct / t.total, t.status === 'strong' ? 'good' : 'weak')))) : null,
       mistakes.length ? h('section', { class: 'quiz-review' },
         h('h2', {}, `Розбір помилок (${mistakes.length})`),
@@ -1384,7 +1395,7 @@ async function showTest(exam, only = null) {
           h('p', { class: 'quiz-prompt pre' }, q.prompt),
           h('div', { class: 'quiz-options' }, q.options.map((_, i) => optionButton(q, i, answers[q.id] ?? -1, () => {}))),
           answers[q.id] === undefined ? h('p', { class: 'muted small' }, 'Без відповіді.') : null,
-          sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'Жодної помилки. Чудово! 🎉'),
+          sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'Жодної помилки.'),
       h('div', { class: 'quiz-actions' },
         mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam, mistakes.map((q) => q.id)) }, `Повторити помилки (${mistakes.length})`) : null,
         practice ? null : h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam) }, 'Пройти ще раз'),
@@ -1398,7 +1409,7 @@ async function showTest(exam, only = null) {
       h('h1', {}, practice ? 'Робота над помилками' : 'Діагностичний тест'),
       h('p', { class: 'muted' }, practice
         ? 'Лише питання, на які ви відповіли неправильно. Результат не зберігається.'
-        : 'Відповідайте чесно: мета — знайти, чого ви ще не знаєте.')),
+        : 'Відповідайте чесно: мета в тому, щоб знайти, чого ви ще не знаєте.')),
     root);
   if (order.length) draw();
   else root.replaceChildren(h('p', { class: 'muted' }, 'У цього екзамену ще немає питань.'));

@@ -18,6 +18,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
 
 ### Changed
+- `ui`: Design polish: plain Ukrainian punctuation instead of dashes, arrows and dot-joined strings; no emoji in the interface; no toast for what you already see on screen; a Ukrainian file picker; the phone menu on one row; Edit before Delete on the exam; one filled button per settings screen; the progress bar animates by transform.
 - `ui`: The whole interface, server messages, Telegram bot and Chrome extension are in Ukrainian; dates use the Ukrainian format. Fonts switched to IBM Plex Sans and Mono, which have Cyrillic.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 

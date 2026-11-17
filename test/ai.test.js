@@ -230,7 +230,7 @@ test('ai: generate needs a key and slides, checks the count; errors and refusals
   assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /PDF або PPTX/);
   await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l1.pptx', data: PPTX.toString('base64') });
   for (const count of [0, 31, 2.5, '5']) {
-    assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, { count })).data.error, /1–30 питань/);
+    assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, { count })).data.error, /від 1 до 30 питань/);
   }
   assert.equal(refusing.requests.length, 0);
   const refused = await on.call('POST', `/api/exams/${exam.id}/generate`, {});
