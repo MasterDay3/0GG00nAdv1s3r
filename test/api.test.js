@@ -783,3 +783,27 @@ test('security headers: HSTS only behind HTTPS, permissions locked down', async 
   t.after(https.close);
   assert.match((await fetch(`${https.base}/`)).headers.get('strict-transport-security'), /max-age=31536000/);
 });
+
+test('cleanup: expired sessions, old AI runs and reminder marks of past deadlines go away', async (t) => {
+  let clock = NOW;
+  const db = openDb(':memory:');
+  const { app, base, close } = await start({ now: () => clock, db });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const { id: past } = (await call('POST', '/api/deadlines', { title: 'Old', dueAt: NOW - 8 * DAY })).data;
+  const { id: soon } = (await call('POST', '/api/deadlines', { title: 'Soon', dueAt: NOW + DAY })).data;
+  const userId = db.prepare('SELECT id FROM users').get().id;
+  for (const key of [`d${past}`, `d${soon}`, 'd9999']) {
+    db.prepare("INSERT INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, '1d')").run(userId, key);
+  }
+  db.prepare('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)').run(userId, NOW - 2 * DAY);
+  db.prepare('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)').run(userId, NOW - HOUR);
+
+  app.cleanup();
+  assert.deepEqual(db.prepare('SELECT item_key FROM reminders_sent').all().map((r) => r.item_key), [`d${soon}`]);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ai_runs').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1);
+  clock += 31 * DAY;
+  app.cleanup();
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
+});

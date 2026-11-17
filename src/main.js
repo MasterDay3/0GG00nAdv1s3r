@@ -30,6 +30,7 @@ const safely = (job) => () => job().catch((err) => console.error(err));
 setInterval(safely(app.runReminders), MINUTE);
 setInterval(safely(app.runDigests), MINUTE);
 setInterval(safely(app.syncAll), 6 * 60 * MINUTE);
+setInterval(() => { try { app.cleanup(); } catch (err) { console.error(err); } }, 60 * MINUTE);
 
 async function pollTelegram() {
   let offset = 0;

@@ -1108,6 +1108,19 @@ export function createApp({
     }
   }
 
+  // Hourly housekeeping: rows that only ever grow and are no longer needed.
+  function cleanup() {
+    const t = now();
+    run('DELETE FROM sessions WHERE expires_at <= ?', t);
+    run('DELETE FROM ai_runs WHERE created_at <= ?', t - DAY);
+    run('UPDATE users SET reset_hash = NULL, reset_expires = NULL, reset_tries = 0 WHERE reset_expires <= ?', t);
+    // Reminder marks for deadlines and exams that are gone or a week past: no reminder can come for them any more.
+    run(`DELETE FROM reminders_sent WHERE
+      (item_key LIKE 'd%' AND CAST(substr(item_key, 2) AS INTEGER) NOT IN (SELECT id FROM deadlines WHERE due_at > ?))
+      OR (item_key LIKE 'e%' AND CAST(substr(item_key, 2) AS INTEGER) NOT IN (SELECT id FROM exams WHERE exam_at > ?))`,
+    t - 7 * DAY, t - 7 * DAY);
+  }
+
   async function syncAll() {
     // Users with the extension connected are synced from their browser instead.
     for (const user of all('SELECT * FROM users WHERE ics_url IS NOT NULL AND ext_key_hash IS NULL')) {
@@ -1119,5 +1132,5 @@ export function createApp({
     }
   }
 
-  return { handler, handleTelegramUpdate, runReminders, runDigests, syncAll };
+  return { handler, handleTelegramUpdate, runReminders, runDigests, syncAll, cleanup };
 }
