@@ -227,7 +227,7 @@ function deadlineRow(item, now, reload) {
     ? h('a', { href: `#/prep/${item.id}`, class: 'title' }, `Exam: ${item.title}`)
     : href ? h('a', { href, class: 'title', target: '_blank', rel: 'noopener noreferrer' }, item.title)
       : h('span', { class: 'title' }, item.title);
-  return h('li', { class: `item ${item.urgency}` },
+  return h('li', { class: `item ${item.urgency}${item.done ? ' done' : ''}` },
     h('div', { class: 'due' },
       h('time', { class: 'num', datetime: new Date(item.dueAt).toISOString(), title: fmtDate(item.dueAt) }, fmtTime(item.dueAt)),
       h('span', { class: `chip ${item.urgency}` }, item.urgency === 'overdue' ? 'Past due' : relative(item.dueAt, now))),
@@ -235,6 +235,13 @@ function deadlineRow(item, now, reload) {
       titleNode,
       h('div', { class: 'meta' }, item.course ? h('span', {}, item.course) : null, h('span', { class: 'tag' }, SOURCE_LABEL[item.source]))),
     h('div', { class: 'item-actions' },
+      item.key.startsWith('d') ? h('button', {
+        type: 'button', class: 'secondary small', 'aria-pressed': String(item.done),
+        title: item.done ? 'Move back to the board' : 'Mark as done: it leaves the board and gets no more reminders',
+        onclick: async () => {
+          if (await act(() => api('PUT', '/api/done', { key: item.key, done: !item.done }), item.done ? 'Back on the board' : 'Done ✅')) reload();
+        },
+      }, item.done ? 'Undo' : 'Done') : null,
       item.canDelete ? h('button', {
         type: 'button', class: 'danger small',
         onclick: async () => {
@@ -304,8 +311,11 @@ function addDeadlineForm(reload) {
 async function showBoard() {
   const [{ items, now }] = await Promise.all([api('GET', '/api/deadlines'), refreshMe()]);
   const showPast = sessionStorageGet('showPast') === '1';
-  const upcoming = items.filter((i) => i.urgency !== 'overdue');
-  const past = items.filter((i) => i.urgency === 'overdue');
+  const showDone = sessionStorageGet('showDone') === '1';
+  const open = items.filter((i) => !i.done);
+  const doneItems = items.filter((i) => i.done).sort((a, b) => b.dueAt - a.dueAt);
+  const upcoming = open.filter((i) => i.urgency !== 'overdue');
+  const past = open.filter((i) => i.urgency === 'overdue');
   const counts = { red: 0, amber: 0 };
   for (const i of upcoming) if (i.urgency in counts) counts[i.urgency]++;
 
@@ -314,6 +324,12 @@ async function showBoard() {
       type: 'checkbox', checked: showPast,
       onchange: (e) => { sessionStorageSet('showPast', e.target.checked ? '1' : '0'); render(); },
     }), `Show past (${past.length})`);
+
+  const doneToggle = doneItems.length ? h('label', { class: 'inline small' },
+    h('input', {
+      type: 'checkbox', checked: showDone,
+      onchange: (e) => { sessionStorageSet('showDone', e.target.checked ? '1' : '0'); render(); },
+    }), `Show done (${doneItems.length})`) : null;
 
   const list = [...(showPast ? past : []), ...upcoming];
 
@@ -350,7 +366,8 @@ async function showBoard() {
         h('div', { class: 'board-actions' },
           syncButton,
           me.icsUrl ? null : h('a', { href: '#/settings' }, 'Connect Moodle'),
-          pastToggle)),
+          pastToggle,
+          doneToggle)),
       upcoming.length ? nextCard(upcoming[0], now) : null),
     addDeadlineForm(render),
     list.length
@@ -360,8 +377,13 @@ async function showBoard() {
           g.key === 'past' ? null : h('span', { class: 'num' }, new Date(g.key.replace(/-/g, '/')).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))),
         h('ul', { class: 'ledger' }, g.items.map((item) => deadlineRow(item, now, render)))))
       : h('div', { class: 'panel empty' },
-        h('p', {}, 'No deadlines yet.'),
-        h('p', {}, h('a', { href: '#/settings' }, 'Connect your Moodle calendar'), ' or add one above.')),
+        h('p', {}, doneItems.length ? 'All done. Nothing left on the board 🎉' : 'No deadlines yet.'),
+        doneItems.length ? null : h('p', {}, h('a', { href: '#/settings' }, 'Connect your Moodle calendar'), ' or add one above.')),
+    showDone && doneItems.length
+      ? h('section', { class: 'day done-list' },
+        h('div', { class: 'day-head' }, h('h2', {}, 'Done'), h('span', { class: 'num' }, String(doneItems.length))),
+        h('ul', { class: 'ledger' }, doneItems.map((item) => deadlineRow(item, now, render))))
+      : null,
   );
 }
 

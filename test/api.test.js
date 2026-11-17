@@ -27,7 +27,9 @@ async function start(options = {}) {
   const telegram = {
     enabled: true,
     botName: async () => 'dueboard_test_bot',
-    send: async (chatId, text) => { sent.push({ chatId, text }); },
+    send: async (chatId, text, options = {}) => { sent.push({ chatId, text, ...options }); },
+    editMessage: async (chatId, messageId, text) => { sent.push({ chatId, messageId, text, edited: true }); },
+    answerButton: async (queryId, text) => { sent.push({ queryId, text, answer: true }); },
   };
   const app = createApp({ db: openDb(':memory:'), now: () => NOW, telegram, ...options });
   const server = createServer(app.handler);
@@ -358,6 +360,60 @@ test('telegram: a chat that blocked the bot gets unlinked', async (t) => {
   t.mock.method(console, 'error', () => {});
   await app.runReminders();
   assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
+});
+
+test('done: leaves the board, stops reminders, per user for group deadlines, undo', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const maryan = await signedUp(base, 'maryan');
+  const { code } = (await mykola('POST', '/api/group', { name: 'CS-2' })).data;
+  await maryan('POST', '/api/group/join', { code });
+  const essay = (await mykola('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 12 * HOUR })).data;
+  const report = (await mykola('POST', '/api/deadlines', { title: 'Team report', dueAt: NOW + 12 * HOUR, shared: true })).data;
+  const exam = (await mykola('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 12 * HOUR })).data;
+
+  assert.equal((await mykola('PUT', '/api/done', { key: essay.key })).status, 200);
+  assert.equal((await mykola('PUT', '/api/done', { key: report.key })).status, 200);
+  assert.equal((await maryan('PUT', '/api/done', { key: essay.key })).status, 404, 'not on her board');
+  assert.equal((await mykola('PUT', '/api/done', { key: `e${exam.id}` })).status, 404, 'exams are not "done"');
+
+  const board = (await mykola('GET', '/api/deadlines')).data.items;
+  assert.deepEqual(board.filter((i) => i.done).map((i) => i.title).sort(), ['Essay', 'Team report']);
+  const hers = (await maryan('GET', '/api/deadlines')).data.items;
+  assert.equal(hers.find((i) => i.title === 'Team report').done, false, 'done is personal');
+
+  await linkTelegram(app, mykola, 1);
+  sent.length = 0;
+  await app.runReminders();
+  assert.deepEqual(sent.map((m) => m.text.match(/Essay|Team report|Calculus/)[0]), ['Calculus']);
+
+  await mykola('PUT', '/api/done', { key: essay.key, done: false });
+  sent.length = 0;
+  await app.runReminders();
+  assert.match(sent[0].text, /Essay/);
+  assert.equal(sent[0].doneKey, essay.key, 'reminder carries a Done button');
+});
+
+test('done: the Telegram button marks the deadline done and edits the reminder', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const essay = (await call('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 12 * HOUR })).data;
+  await linkTelegram(app, call, 5);
+  const press = (data, chatId = 5) => app.handleTelegramUpdate({
+    callback_query: { id: 'q1', data, message: { message_id: 77, chat: { id: chatId }, text: '⏰ Essay is due' } },
+  });
+
+  sent.length = 0;
+  await press(`done:${essay.key}`);
+  assert.equal((await call('GET', '/api/deadlines')).data.items[0].done, true);
+  assert.deepEqual(sent.find((m) => m.edited), { chatId: '5', messageId: 77, text: '⏰ Essay is due\n\n✅ Done', edited: true });
+  assert.equal(sent.find((m) => m.answer).text, 'Marked as done ✅');
+
+  sent.length = 0;
+  await press(`done:${essay.key}`, 999);
+  assert.deepEqual(sent, [{ queryId: 'q1', text: 'This chat is not linked to Dueboard any more.', answer: true }]);
 });
 
 test('prep: exam on the board, diagnostic test, weak topics and plan, owner-only access', async (t) => {

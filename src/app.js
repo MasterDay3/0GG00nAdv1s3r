@@ -25,6 +25,7 @@ const STATIC = {
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/tokens.css': ['tokens.css', 'text/css; charset=utf-8'],
   '/base.css': ['base.css', 'text/css; charset=utf-8'],
+  '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
 };
 
 const SECURITY_HEADERS = {
@@ -142,16 +143,37 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   // ---------- board ----------
 
+  // Row ids can be reused after a delete, so per-user rows keyed by 'd<id>' go with the deadline.
+  function forgetDeadline(id) {
+    run('DELETE FROM deadlines WHERE id = ?', id);
+    for (const table of ['notes', 'done', 'reminders_sent']) run(`DELETE FROM ${table} WHERE item_key = ?`, `d${id}`);
+  }
+
+  function markDone(user, key, isDone) {
+    if (!/^d\d+$/.test(key) || !boardItems(user).some((item) => item.key === key)) {
+      throw new HttpError(404, 'Deadline not found');
+    }
+    if (isDone) {
+      run('INSERT OR IGNORE INTO done (user_id, item_key, done_at) VALUES (?, ?, ?)', user.id, key, now());
+    } else {
+      run('DELETE FROM done WHERE user_id = ? AND item_key = ?', user.id, key);
+    }
+  }
+
+  // What still needs doing: the board without what the user marked done.
+  const openItems = (user) => boardItems(user).filter((item) => !item.done);
+
   function boardItems(user) {
     const t = now();
     const deadlines = all(
-      `SELECT d.*, n.text AS note FROM deadlines d
+      `SELECT d.*, n.text AS note, dn.done_at FROM deadlines d
        LEFT JOIN notes n ON n.user_id = ? AND n.item_key = 'd' || d.id
+       LEFT JOIN done dn ON dn.user_id = ? AND dn.item_key = 'd' || d.id
        WHERE d.owner_user_id = ? OR (d.group_id IS NOT NULL AND d.group_id = ?)`,
-      user.id, user.id, user.group_id ?? -1,
+      user.id, user.id, user.id, user.group_id ?? -1,
     ).map((d) => ({
       key: `d${d.id}`, id: d.id, source: d.source, course: d.course, title: d.title, url: d.url,
-      dueAt: d.due_at, note: d.note || '',
+      dueAt: d.due_at, note: d.note || '', done: d.done_at != null,
       canDelete: d.source !== 'moodle' && d.created_by === user.id,
     }));
     const exams = all(
@@ -161,7 +183,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       user.id, user.id,
     ).map((e) => ({
       key: `e${e.id}`, id: e.id, source: 'exam', course: e.course, title: e.title, url: '',
-      dueAt: e.exam_at, note: e.note || '', canDelete: false,
+      dueAt: e.exam_at, note: e.note || '', done: false, canDelete: false,
     }));
     return [...deadlines, ...exams]
       .map((item) => ({ ...item, urgency: urgency(item.dueAt, t) }))
@@ -189,7 +211,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
         const uids = new Set(events.map((e) => e.uid.slice(0, 500)));
         const stale = all(`SELECT id, uid FROM deadlines WHERE owner_user_id = ? AND source = 'moodle' AND due_at > ?`, user.id, t)
           .filter((d) => !uids.has(d.uid));
-        for (const d of stale) run('DELETE FROM deadlines WHERE id = ?', d.id);
+        for (const d of stale) forgetDeadline(d.id);
       }
       db.exec('COMMIT');
     } catch (err) {
@@ -365,7 +387,12 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       params.id, user.id, user.id, user.group_id ?? -1,
     );
     if (!changes) throw new HttpError(404, 'Deadline not found');
-    run(`DELETE FROM notes WHERE item_key = ?`, `d${params.id}`);
+    forgetDeadline(params.id);
+    return { ok: true };
+  });
+
+  route('PUT', '/api/done', ({ user, body }) => {
+    markDone(user, text(body.key, 'Item', { max: 24 }), body.done !== false);
     return { ok: true };
   });
 
@@ -447,7 +474,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('DELETE', '/api/exams/:id', ({ user, params }) => {
     ownExam(user, params.id);
     run('DELETE FROM exams WHERE id = ?', params.id);
-    run('DELETE FROM notes WHERE item_key = ?', `e${params.id}`);
+    for (const table of ['notes', 'reminders_sent']) run(`DELETE FROM ${table} WHERE item_key = ?`, `e${params.id}`);
     return { ok: true };
   });
 
@@ -603,9 +630,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   // ---------- background jobs ----------
 
   // Sends to a linked chat; a chat that blocked the bot (403) is unlinked so we stop writing to it.
-  async function sendTo(user, message) {
+  async function sendTo(user, message, options) {
     try {
-      await telegram.send(user.tg_chat_id, message);
+      await telegram.send(user.tg_chat_id, message, options);
       return true;
     } catch (err) {
       if (err.code === 403) run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
@@ -623,7 +650,27 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     for (const member of members) await sendTo(member, message);
   }
 
+  // The "✅ Done" button under a reminder.
+  async function handleTelegramButton(query) {
+    const chatId = query.message?.chat?.id;
+    const user = chatId != null && one('SELECT * FROM users WHERE tg_chat_id = ?', String(chatId));
+    const key = /^done:(d\d+)$/.exec(query.data || '')?.[1];
+    let answer = 'This deadline is gone from your board.';
+    if (!user) answer = 'This chat is not linked to Dueboard any more.';
+    else if (key) {
+      try {
+        markDone(user, key, true);
+        answer = 'Marked as done ✅';
+        await telegram.editMessage(String(chatId), query.message.message_id, `${query.message.text}\n\n✅ Done`);
+      } catch (err) {
+        if (!(err instanceof HttpError)) console.error('Telegram done button failed:', err.message);
+      }
+    }
+    await telegram.answerButton(query.id, answer);
+  }
+
   async function handleTelegramUpdate(update) {
+    if (update.callback_query) return handleTelegramButton(update.callback_query);
     const message = update.message;
     if (!message?.chat || typeof message.text !== 'string') return;
     // Deadlines are personal: only answer in a private chat with the bot, never in group chats.
@@ -643,7 +690,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       return reply(linkedText(target.username));
     }
     if (command === '/deadlines') {
-      return reply(user ? deadlinesText(boardItems(user), now()) : NOT_LINKED);
+      return reply(user ? deadlinesText(openItems(user), now()) : NOT_LINKED);
     }
     if (command === '/digest') {
       if (!user) return reply(NOT_LINKED);
@@ -667,8 +714,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       const sent = new Set(
         all('SELECT item_key, kind FROM reminders_sent WHERE user_id = ?', user.id).map((r) => `${r.item_key}:${r.kind}`),
       );
-      for (const { item, kind } of dueReminders(boardItems(user), sent, t)) {
-        if (!(await sendTo(user, reminderText(item, kind)))) break;
+      for (const { item, kind } of dueReminders(openItems(user), sent, t)) {
+        const button = item.key.startsWith('d') ? { doneKey: item.key } : {};
+        if (!(await sendTo(user, reminderText(item, kind), button))) break;
         run('INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, ?)', user.id, item.key, kind);
         // The 1-day reminder makes the 3-day one pointless.
         if (kind === '1d') run(`INSERT OR IGNORE INTO reminders_sent (user_id, item_key, kind) VALUES (?, ?, '3d')`, user.id, item.key);
@@ -685,7 +733,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       `SELECT * FROM users WHERE tg_chat_id IS NOT NULL AND tg_digest = 1 AND (tg_digest_on IS NULL OR tg_digest_on != ?)`, date,
     );
     for (const user of users) {
-      const message = digestText(boardItems(user), t);
+      const message = digestText(openItems(user), t);
       if (message && !(await sendTo(user, message))) continue;
       run('UPDATE users SET tg_digest_on = ? WHERE id = ?', date, user.id);
     }

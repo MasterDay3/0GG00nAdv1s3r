@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS notes (
   text TEXT NOT NULL,
   PRIMARY KEY (user_id, item_key)
 );
+-- Deadlines a user marked as done (per user: a group deadline can be done for one member and not another).
+CREATE TABLE IF NOT EXISTS done (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL,
+  done_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, item_key)
+);
 CREATE TABLE IF NOT EXISTS reminders_sent (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   item_key TEXT NOT NULL,

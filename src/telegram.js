@@ -24,15 +24,23 @@ export function createTelegram({ token, fetchImpl = globalThis.fetch, log = cons
       cachedName ??= (await call('getMe', {})).username;
       return cachedName;
     },
-    async send(chatId, text) {
+    // doneKey adds a "✅ Done" button that marks that deadline as done.
+    async send(chatId, text, { doneKey } = {}) {
       if (!token) return log(`[telegram off] to ${chatId}: ${text}`);
-      await call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true });
+      const markup = doneKey ? { reply_markup: { inline_keyboard: [[{ text: '✅ Done', callback_data: `done:${doneKey}` }]] } } : {};
+      await call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true, ...markup });
+    },
+    async editMessage(chatId, messageId, text) {
+      if (token) await call('editMessageText', { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true });
+    },
+    async answerButton(queryId, text) {
+      if (token) await call('answerCallbackQuery', { callback_query_id: queryId, text });
     },
     async setCommands(commands) {
       if (token) await call('setMyCommands', { commands });
     },
     getUpdates(offset) {
-      return call('getUpdates', { offset, timeout: 25, allowed_updates: ['message'] });
+      return call('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'callback_query'] });
     },
   };
 }
