@@ -22,6 +22,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `api`: Calendar feed: a secret link (shown once, can be replaced or turned off) that Google, Apple or Outlook calendars subscribe to; open deadlines and exams, refreshed hourly.
 - `ui`: Search the board by title, course or note, and filter it by course; while searching, past and done deadlines are searched too.
 - `ui`: Edit a deadline you added (title, course, date, link); a new date brings its reminders back.
 - `ui`: Edit an exam (name, course, date), rename a topic, edit a question (text, options, right answer, topic) or a practice problem, AI questions included.

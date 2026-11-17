@@ -730,8 +730,58 @@ async function showSettings() {
     extensionSection,
     setting('Ваша група', groupCard),
     setting('Нагадування в Telegram', tgBox),
+    setting('Google чи Apple Календар', calendarCard()),
     setting('Імпорт файлу', importBox),
     setting('Акаунт', accountCard()));
+}
+
+// The board as a calendar feed: the secret link is shown once, right after it is made.
+function calendarCard() {
+  const box = h('div', {});
+  const intro = h('p', { class: 'muted small' }, 'Дедлайни й екзамени з’являться у вашому календарі на телефоні й оновлюватимуться самі. Виконані зникають. Google оновлює підписані календарі раз на кілька годин.');
+
+  const create = async () => {
+    if (me.calendarFeed && !confirm('Створити нове посилання? Старе перестане працювати, і календар, підписаний на нього, перестане оновлюватися.')) return;
+    const r = await act(() => api('POST', '/api/calendar-feed', {}));
+    if (!r) return;
+    me.calendarFeed = true;
+    showLink(`${location.origin}${r.path}`);
+  };
+  const turnOff = async () => {
+    if (!confirm('Вимкнути посилання? Календарі, підписані на нього, перестануть оновлюватися.')) return;
+    if (await act(() => api('DELETE', '/api/calendar-feed'), 'Посилання вимкнено')) { me.calendarFeed = false; draw(); }
+  };
+
+  function showLink(url) {
+    const webcal = url.replace(/^https?:/, 'webcal:');
+    const input = h('input', { type: 'text', readonly: true, value: url, 'aria-label': 'Посилання на календар', onfocus: (e) => e.target.select() });
+    box.replaceChildren(
+      intro,
+      h('p', { class: 'small' }, h('strong', {}, 'Збережіть посилання зараз: ми покажемо його лише раз.'), ' Воно секретне, як пароль: хто його має, бачить ваші дедлайни.'),
+      h('div', { class: 'row' }, h('label', { class: 'grow' }, input),
+        h('button', {
+          type: 'button', class: 'secondary shrink',
+          onclick: async () => {
+            try { await navigator.clipboard.writeText(url); toast('Скопійовано'); } catch { input.focus(); toast('Скопіюйте посилання вручну', true); }
+          },
+        }, 'Копіювати')),
+      h('ul', { class: 'small calendar-how' },
+        h('li', {}, h('a', { href: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}`, target: '_blank', rel: 'noopener noreferrer' }, 'Додати в Google Календар'), ' (або Google Календар → Інші календарі → + → З URL-адреси).'),
+        h('li', {}, h('a', { href: webcal }, 'Відкрити в Apple Календарі'), ' на iPhone чи Mac.'),
+        h('li', {}, 'Outlook: Додати календар → Підписатися з Інтернету.')));
+  }
+
+  function draw() {
+    box.replaceChildren(intro, me.calendarFeed
+      ? h('div', {},
+        h('p', {}, h('span', { class: 'status-ok' }, 'Увімкнено'), ' Загубили посилання? Створіть нове: старе вимкнеться.'),
+        h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'secondary shrink', onclick: create }, 'Нове посилання'),
+          h('button', { type: 'button', class: 'secondary shrink', onclick: turnOff }, 'Вимкнути')))
+      : h('button', { type: 'button', class: 'secondary', onclick: create }, 'Створити посилання'));
+  }
+  draw();
+  return box;
 }
 
 function accountCard() {

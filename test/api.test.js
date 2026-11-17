@@ -666,3 +666,32 @@ test('edit: exam, topic, question and problem, owner-only', async (t) => {
   ]);
   assert.deepEqual(exam.topics[1].questions[0].options, ['3', '4', '5']);
 });
+
+test('calendar feed: secret link without a cookie, open items only, new link turns the old one off', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  await mykola('POST', '/api/deadlines', { title: 'Essay', course: 'Ethics', dueAt: NOW + DAY });
+  const { key } = (await mykola('POST', '/api/deadlines', { title: 'Done already', dueAt: NOW + DAY })).data;
+  await mykola('PUT', '/api/done', { key, done: true });
+  await mykola('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * DAY });
+  assert.equal((await mykola('GET', '/api/me')).data.calendarFeed, false);
+
+  const { path } = (await mykola('POST', '/api/calendar-feed', {})).data;
+  assert.match(path, /^\/cal\/[a-f0-9]{64}\.ics$/);
+  assert.equal((await mykola('GET', '/api/me')).data.calendarFeed, true);
+  const feed = await fetch(base + path);
+  assert.equal(feed.status, 200);
+  assert.match(feed.headers.get('content-type'), /^text\/calendar/);
+  const body = await feed.text();
+  assert.match(body, /\[Ethics\] Essay/);
+  assert.match(body, /Екзамен: Calculus/);
+  assert.doesNotMatch(body, /Done already/);
+
+  assert.equal((await fetch(`${base}/cal/${'0'.repeat(64)}.ics`)).status, 404);
+  const { path: second } = (await mykola('POST', '/api/calendar-feed', {})).data;
+  assert.equal((await fetch(base + path)).status, 404, 'the old link stops working');
+  assert.equal((await fetch(base + second)).status, 200);
+  await mykola('DELETE', '/api/calendar-feed');
+  assert.equal((await fetch(base + second)).status, 404);
+});

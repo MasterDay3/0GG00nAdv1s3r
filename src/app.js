@@ -9,6 +9,7 @@ import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
 import { createAi, COUNT } from './ai.js';
 import { createLimiter, clientIp } from './limiter.js';
+import { buildCalendar } from './ics-export.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -178,6 +179,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       lastSyncAt: user.last_sync_at,
       telegram: { enabled: telegram.enabled, linked: Boolean(user.tg_chat_id), digest: Boolean(user.tg_digest) },
       extension: { connected: Boolean(user.ext_key_hash) },
+      calendarFeed: Boolean(user.cal_token_hash),
     };
   }
 
@@ -591,6 +593,35 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     return { imported };
   }, { auth: 'extension', limit: MAX_FEED + 4096 });
 
+  // ---------- routes: calendar feed ----------
+
+  // The link is shown once; making a new one turns the old one off.
+  route('POST', '/api/calendar-feed', ({ user }) => {
+    const token = randomBytes(32).toString('hex');
+    run('UPDATE users SET cal_token_hash = ? WHERE id = ?', sha256(token), user.id);
+    return { path: `/cal/${token}.ics` };
+  });
+
+  route('DELETE', '/api/calendar-feed', ({ user }) => {
+    run('UPDATE users SET cal_token_hash = NULL WHERE id = ?', user.id);
+    return { ok: true };
+  });
+
+  // Calendar apps fetch the feed without a cookie, so the secret in the link is the only key.
+  function serveCalendar(token, req, res) {
+    const user = one('SELECT * FROM users WHERE cal_token_hash = ?', sha256(token));
+    if (!user) throw new HttpError(404, 'Не знайдено');
+    const t = now();
+    // What is still to do, plus the last 30 days so a calendar does not lose what just passed.
+    const items = openItems(user).filter((item) => item.dueAt > t - 30 * DAY);
+    res.writeHead(200, {
+      'content-type': 'text/calendar; charset=utf-8',
+      'content-disposition': 'inline; filename="dueboard.ics"',
+      'cache-control': 'private, max-age=300',
+    });
+    res.end(req.method === 'HEAD' ? undefined : buildCalendar(items, t));
+  }
+
   // ---------- routes: telegram ----------
 
   route('POST', '/api/telegram/link', async ({ user }) => {
@@ -894,6 +925,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       const { pathname } = new URL(req.url, 'http://localhost');
       if (!pathname.startsWith('/api/')) {
         if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Метод не підтримується');
+        const feed = /^\/cal\/([a-f0-9]{64})\.ics$/.exec(pathname);
+        if (feed) return serveCalendar(feed[1], req, res);
         return await serveStatic(pathname, res);
       }
       const match = routes.find((r) => r.method === req.method && r.re.test(pathname));

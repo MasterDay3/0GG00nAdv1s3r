@@ -392,3 +392,4 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .filter-bar .grow { flex: 1 1 240px; }
 .filter-bar select { min-width: 180px; }
 .board-list { margin-top: var(--space-md); }
+.calendar-how { margin: var(--space-sm) 0 0; padding-left: 1.2em; } .calendar-how li + li { margin-top: var(--space-2xs); }

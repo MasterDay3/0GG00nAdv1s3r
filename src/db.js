@@ -110,7 +110,10 @@ export function openDb(path = ':memory:') {
     db.exec('ALTER TABLE users ADD COLUMN reset_expires INTEGER');
     db.exec('ALTER TABLE users ADD COLUMN reset_tries INTEGER NOT NULL DEFAULT 0');
   }
+  // Secret link to the board as a calendar feed (stored hashed, like the extension key).
+  if (!userColumns.includes('cal_token_hash')) db.exec('ALTER TABLE users ADD COLUMN cal_token_hash TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).
   db.exec(`
 CREATE TABLE IF NOT EXISTS question_sources (
