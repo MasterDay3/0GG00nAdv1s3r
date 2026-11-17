@@ -760,3 +760,26 @@ test('pwa: manifest, service worker and icons are served with the right types', 
   assert.equal(sw.headers.get('cache-control'), 'no-cache', 'browsers must see a new worker at once');
   assert.equal((await fetch(`${base}/apple-touch-icon.png`)).headers.get('content-type'), 'image/png');
 });
+
+test('moodle: a calendar link to an internal address is refused, manual syncs are limited', async (t) => {
+  const { base, close } = await start({ fetchImpl: undefined });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('PUT', '/api/settings', { icsUrl: 'http://169.254.169.254/latest/meta-data/' });
+  const sync = await call('POST', '/api/sync', {});
+  assert.equal(sync.status, 400);
+  assert.match(sync.data.error, /внутрішню адресу/);
+  for (let i = 1; i < 10; i++) await call('POST', '/api/sync', {});
+  assert.equal((await call('POST', '/api/sync', {})).status, 429);
+});
+
+test('security headers: HSTS only behind HTTPS, permissions locked down', async (t) => {
+  const plain = await start();
+  t.after(plain.close);
+  const res = await fetch(`${plain.base}/`);
+  assert.equal(res.headers.get('strict-transport-security'), null);
+  assert.match(res.headers.get('permissions-policy'), /camera=\(\)/);
+  const https = await start({ secureCookies: true });
+  t.after(https.close);
+  assert.match((await fetch(`${https.base}/`)).headers.get('strict-transport-security'), /max-age=31536000/);
+});

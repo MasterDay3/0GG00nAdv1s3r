@@ -10,6 +10,7 @@ import { HttpError, text, link, timestamp } from './validate.js';
 import { createAi, COUNT } from './ai.js';
 import { createLimiter, clientIp } from './limiter.js';
 import { buildCalendar } from './ics-export.js';
+import { safeFetch } from './safe-fetch.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -45,6 +46,8 @@ const SECURITY_HEADERS = {
     + "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'cross-origin-opener-policy': 'same-origin',
 };
 
 function hashPassword(password, salt = randomBytes(16)) {
@@ -113,7 +116,7 @@ function normalizeFeedUrl(value) {
 
 // storageLimit: bytes of uploaded files one user may keep, across all their exams.
 export function createApp({
-  db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false, ai = createAi(),
+  db, now = () => Date.now(), fetchImpl = safeFetch, telegram, secureCookies = false, ai = createAi(),
   storageLimit = 100 * 1024 * 1024,
 }) {
   // Behind HTTPS the session cookie must never travel over plain HTTP.
@@ -143,6 +146,8 @@ export function createApp({
     resetIp: createLimiter({ limit: 20, windowMs: 15 * MINUTE, now }),
     // Wrong current passwords when changing the password or deleting the account.
     confirmFails: createLimiter({ limit: 5, windowMs: 15 * MINUTE, now }),
+    // Manual Moodle syncs: each one makes the server download a link.
+    sync: createLimiter({ limit: 10, windowMs: 10 * MINUTE, now }),
   };
 
   function guard(res, ...checks) {
@@ -276,7 +281,7 @@ export function createApp({
     if (!user.ics_url) throw new HttpError(400, 'Спершу додайте посилання на календар Moodle');
     let body;
     try {
-      const res = await fetchImpl(user.ics_url, { signal: AbortSignal.timeout(15_000) });
+      const res = await fetchImpl(user.ics_url, { signal: AbortSignal.timeout(15_000), maxBytes: MAX_FEED });
       const cloudflareBlock = !res.ok && /cloudflare/i.test(res.headers.get('server') || '');
       if (res.headers.get('cf-mitigated') === 'challenge' || cloudflareBlock) {
         throw new HttpError(502, BOT_WALL_MESSAGE);
@@ -285,6 +290,7 @@ export function createApp({
       body = await res.text();
     } catch (err) {
       if (err instanceof HttpError) throw err;
+      if (err.code === 'BLOCKED_ADDRESS') throw new HttpError(400, 'Посилання має вести на сайт в інтернеті, а не на внутрішню адресу');
       throw new HttpError(502, 'Не вдалося відкрити посилання на календар');
     }
     if (body.length > MAX_FEED) throw new HttpError(502, 'Календар завеликий');
@@ -590,7 +596,11 @@ export function createApp({
     return { ok: true };
   });
 
-  route('POST', '/api/sync', async ({ user }) => ({ imported: await syncMoodle(user) }));
+  route('POST', '/api/sync', async ({ user, res }) => {
+    guard(res, [limits.sync, String(user.id)]);
+    limits.sync.hit(String(user.id));
+    return { imported: await syncMoodle(user) };
+  });
 
   route('POST', '/api/import-ics', ({ user, body }) => {
     const ics = text(body.ics, 'Файл календаря', { max: MAX_FEED });
@@ -958,6 +968,8 @@ export function createApp({
 
   async function handler(req, res) {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
+    // Served over HTTPS: browsers should never try plain HTTP again.
+    if (secureCookies) res.setHeader('strict-transport-security', 'max-age=31536000');
     try {
       const { pathname } = new URL(req.url, 'http://localhost');
       if (!pathname.startsWith('/api/')) {

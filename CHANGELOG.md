@@ -11,6 +11,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 ## [Unreleased]
 
 ### Security
+- `api`: The Moodle calendar link can no longer make the server call internal addresses (localhost, the local network, the cloud metadata service): every address is checked when connecting, on each redirect too, and the download is capped at 5 MB. Manual syncs are limited to 10 per 10 minutes.
+- `infra`: HSTS when served over HTTPS; `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers.
 - `auth`: Change password (signs out every other device), log out on all devices, delete the account with everything in it.
 - `auth`: Forgotten password: a one-time 6-digit code goes to the linked Telegram chat (15 min, 5 tries, 3 codes per 15 min); the answer never reveals whether a username exists.
 - `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
