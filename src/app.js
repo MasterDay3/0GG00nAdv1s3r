@@ -1089,7 +1089,7 @@ export function createApp({
       const on = !user.tg_digest;
       run('UPDATE users SET tg_digest = ? WHERE id = ?', on ? 1 : 0, user.id);
       return reply(on
-        ? `Ранковий дайджест увімкнено. Він приходитиме о ${DIGEST_HOUR}:00, коли цього тижня щось треба здати.`
+        ? `Ранковий дайджест увімкнено. Він приходитиме о ${DIGEST_HOUR}:00, коли цього тижня є дедлайни або план підготовки до екзамену.`
         : 'Ранковий дайджест вимкнено. Нагадування за 3 дні й за 1 день до дедлайну й далі приходитимуть. Надішліть /digest, щоб увімкнути його знову.');
     }
     if (command === '/stop') {
@@ -1118,6 +1118,16 @@ export function createApp({
     }
   }
 
+  // Today's step of every coming exam's plan that has topics (date: 'YYYY-MM-DD' in Kyiv).
+  function todaysStudy(user, date) {
+    return all('SELECT * FROM exams WHERE user_id = ? AND exam_at > ? ORDER BY exam_at', user.id, now())
+      .map((exam) => ({ exam, detail: examDetail(exam) }))
+      .filter(({ detail }) => detail.topics.length)
+      .map(({ exam, detail }) => ({ exam, step: detail.plan.find((d) => d.date === date) }))
+      .filter(({ step }) => step)
+      .map(({ exam, step }) => ({ exam: exam.title, examAt: exam.exam_at, focus: step.focus, topics: step.topics }));
+  }
+
   // Morning digest: once a day after DIGEST_HOUR (Kyiv time), only when something is due within 7 days.
   async function runDigests() {
     const t = now();
@@ -1127,7 +1137,7 @@ export function createApp({
       `SELECT * FROM users WHERE tg_chat_id IS NOT NULL AND tg_digest = 1 AND (tg_digest_on IS NULL OR tg_digest_on != ?)`, date,
     );
     for (const user of users) {
-      const message = digestText(openItems(user), t);
+      const message = digestText(openItems(user), t, todaysStudy(user, date));
       if (message && !(await sendTo(user, message))) continue;
       run('UPDATE users SET tg_digest_on = ? WHERE id = ?', date, user.id);
     }

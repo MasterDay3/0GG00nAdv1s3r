@@ -717,7 +717,7 @@ async function showSettings() {
       tgBox.replaceChildren(h('p', { class: 'muted' }, 'Telegram-бот на цьому сервері вимкнений. Щоб увімкнути нагадування, запустіть сервер із TELEGRAM_BOT_TOKEN.'));
     } else if (me.telegram.linked) {
       tgBox.replaceChildren(
-        h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Бот нагадує про кожен дедлайн, а зранку надсилає дайджест, якщо цього тижня щось треба здати.'),
+        h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Бот нагадує про кожен дедлайн, а зранку надсилає дайджест: що здавати цього тижня і що вчити сьогодні.'),
         reminderChoice(),
         h('p', { class: 'muted' }, 'У боті: /deadlines — список дедлайнів, /digest — увімкнути чи вимкнути дайджест, /stop — відв’язати чат.'),
         h('button', {

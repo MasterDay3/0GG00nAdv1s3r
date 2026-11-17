@@ -850,3 +850,24 @@ test('telegram: reminder times are chosen in settings, a 3-hour one can be added
   await app.runReminders();
   assert.deepEqual(sent.map((m) => /менш ніж за (добу|3 години)/.exec(m.text)[1]), ['добу', '3 години']);
 });
+
+test('telegram: the morning digest says what to study today for a coming exam', async (t) => {
+  const clock = Date.UTC(2026, 10, 14, 6, 5); // 08:05 Kyiv
+  const { app, base, sent, close } = await start({ now: () => clock });
+  t.after(close);
+  const student = await signedUp(base, 'student');
+  const { id: examId } = (await student('POST', '/api/exams', { title: 'Calculus', examAt: clock + 10 * DAY })).data;
+  await student('POST', '/api/exams', { title: 'No topics yet', examAt: clock + 12 * DAY });
+  const { id: topic } = (await student('POST', `/api/exams/${examId}/topics`, { name: 'Series' })).data;
+  await student('POST', `/api/topics/${topic}/questions`, { prompt: '?', options: ['a', 'b'], answerIndex: 0 });
+  await student('POST', `/api/exams/${examId}/test`, { answers: {} });
+  await linkTelegram(app, student, 7);
+  sent.length = 0;
+
+  await app.runDigests();
+  assert.equal(sent.length, 1, 'sent although nothing is due this week: there is studying to do');
+  assert.match(sent[0].text, /План підготовки на сьогодні/);
+  assert.doesNotMatch(sent[0].text, /Дедлайни на найближчі/);
+  assert.match(sent[0].text, /📚 Calculus .*тренуйте слабкі теми: Series/);
+  assert.doesNotMatch(sent[0].text, /No topics yet/, 'an exam without topics has no plan to follow');
+});

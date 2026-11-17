@@ -54,11 +54,24 @@ export function deadlinesText(items, now) {
   return `Найближчі дедлайни:\n\n${list(upcoming, now)}`;
 }
 
-// Deadlines in the next 7 days, or null when there are none (then no digest is sent).
-export function digestText(items, now) {
+const FOCUS = { practice: 'тренуйте слабкі теми', refresh: 'повторіть', review: 'загальне повторення всіх тем' };
+
+// study: today's step of each exam plan, [{ exam, examAt, focus, topics }].
+export function studyLines(study) {
+  return study.map((s) => {
+    const topics = s.focus === 'review' || !s.topics.length ? '' : `: ${s.topics.join(', ')}`;
+    return `📚 ${s.exam} (${formatDue(s.examAt)}) — сьогодні ${FOCUS[s.focus]}${topics}`;
+  }).join('\n');
+}
+
+// Deadlines in the next 7 days and today's exam prep, or null when there is neither (then no digest is sent).
+export function digestText(items, now, study = []) {
   const week = items.filter((item) => item.dueAt > now && item.dueAt <= now + 7 * DAY);
-  if (!week.length) return null;
-  return `☀️ Доброго ранку! Дедлайни на найближчі 7 днів:\n\n${list(week, now)}`;
+  if (!week.length && !study.length) return null;
+  const parts = ['☀️ Доброго ранку!'];
+  if (week.length) parts.push(`Дедлайни на найближчі 7 днів:\n\n${list(week, now)}`);
+  if (study.length) parts.push(`План підготовки на сьогодні:\n${studyLines(study)}`);
+  return parts.join('\n\n');
 }
 
 export function groupDeadlineText(author, item, now) {
@@ -67,13 +80,13 @@ export function groupDeadlineText(author, item, now) {
 
 export function linkedText(username) {
   return `Чат прив’язано до Dueboard як ${username}. Нагадування приходитимуть за 3 дні й за 1 день до кожного дедлайну, `
-    + `а о ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня щось треба здати.\n\n${commandList()}`;
+    + `а о ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня є дедлайни або план підготовки до екзамену.\n\n${commandList()}`;
 }
 
 export function helpText(linked) {
   if (!linked) return `Привіт! Я бот Dueboard. ${NOT_LINKED}`;
   return `Я нагадую про дедлайни за 3 дні й за 1 день і надсилаю дайджест о ${DIGEST_HOUR}:00, `
-    + `коли цього тижня щось треба здати.\n\n${commandList()}`;
+    + `коли цього тижня є дедлайни або план підготовки до екзамену.\n\n${commandList()}`;
 }
 
 function commandList() {
