@@ -322,3 +322,5 @@ a.title:hover { text-decoration-color: var(--color-ink); }
 .setting-body form > * + *, .setting-body > div > * + * { margin-top: var(--space-sm); }
 .setting-body form > .row { align-items: center; justify-content: space-between; }
 .auth .tabs button:not(.secondary) { background: var(--color-paper-2); color: var(--color-ink); border-color: var(--color-rule); box-shadow: 0 1px 2px var(--color-rule); }
+.q .source { margin: var(--space-xs) 0 0; }
+.q .source .tag { margin-right: var(--space-3xs); }

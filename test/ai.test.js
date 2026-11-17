@@ -1,0 +1,249 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { deflateRawSync, crc32 } from 'node:zlib';
+import { createApp } from '../src/app.js';
+import { openDb } from '../src/db.js';
+import { createAi, cleanQuestions, materialBlocks, MODEL } from '../src/ai.js';
+import { unzip, pptxSlides, docxText, kindOf } from '../src/slides.js';
+
+const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
+
+// Minimal zip writer, enough to build .pptx/.docx fixtures.
+function zip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(entries)) {
+    const raw = Buffer.from(content);
+    const packed = deflateRawSync(raw);
+    const nameBuf = Buffer.from(name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc32(raw), 14);
+    local.writeUInt32LE(packed.length, 18);
+    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(crc32(raw), 16);
+    central.writeUInt32LE(packed.length, 20);
+    central.writeUInt32LE(raw.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, nameBuf, packed);
+    centrals.push(central, nameBuf);
+    offset += 30 + nameBuf.length + packed.length;
+  }
+  const dir = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(centrals.length / 2, 8);
+  end.writeUInt16LE(centrals.length / 2, 10);
+  end.writeUInt32LE(dir.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, dir, end]);
+}
+
+const slideXml = (...paragraphs) => `<?xml version="1.0"?><p:sld><p:cSld><p:spTree>${
+  paragraphs.map((p) => `<a:p><a:r><a:rPr lang="uk"/><a:t>${p}</a:t></a:r></a:p>`).join('')
+}</p:spTree></p:cSld></p:sld>`;
+
+const PPTX = zip({
+  '[Content_Types].xml': '<Types/>',
+  'ppt/slides/slide2.xml': slideXml('Big O', 'Nested loops over n items take O(n&#178;) time'),
+  'ppt/slides/slide1.xml': slideXml('Complexity &amp; recursion'),
+  'ppt/slides/slide10.xml': slideXml('Summary'),
+});
+
+test('slides: unzip, pptx slides in order with entities decoded, docx text', () => {
+  assert.deepEqual([...unzip(PPTX, (n) => n.startsWith('ppt/')).keys()].sort(), [
+    'ppt/slides/slide1.xml', 'ppt/slides/slide10.xml', 'ppt/slides/slide2.xml',
+  ]);
+  assert.deepEqual(pptxSlides(PPTX), [
+    { slide: 1, text: 'Complexity & recursion' },
+    { slide: 2, text: 'Big O\nNested loops over n items take O(n²) time' },
+    { slide: 10, text: 'Summary' },
+  ]);
+  const docx = zip({ 'word/document.xml': '<w:document><w:body><w:p><w:r><w:t xml:space="preserve">Hash </w:t></w:r><w:r><w:t>tables</w:t></w:r></w:p></w:body></w:document>' });
+  assert.equal(docxText(docx), 'Hash tables');
+  assert.throws(() => unzip(Buffer.from('not a zip at all, definitely not')), /Not a zip/);
+  assert.equal(kindOf('Lecture 3.PDF'), 'pdf');
+  assert.equal(kindOf('slides.ppt'), null);
+});
+
+test('ai: material blocks label every file and skip what cannot be read', () => {
+  const { blocks, slideCount, skipped } = materialBlocks([
+    { id: 1, filename: 'l1.pptx', data: PPTX },
+    { id: 2, filename: 'l2.pdf', data: Buffer.from('%PDF-1.4 fake') },
+    { id: 3, filename: 'notes.md', data: Buffer.from('# Graphs\nBFS uses a queue') },
+    { id: 4, filename: 'photo.png', data: Buffer.from('png') },
+    { id: 5, filename: 'broken.pptx', data: Buffer.from('nope') },
+  ]);
+  assert.match(blocks[0].text, /^Material 1: l1\.pptx\n--- slide 1 ---\nComplexity & recursion/);
+  assert.equal(blocks[2].type, 'document');
+  assert.equal(blocks[2].source.media_type, 'application/pdf');
+  assert.equal(Buffer.from(blocks[2].source.data, 'base64').toString(), '%PDF-1.4 fake');
+  assert.match(blocks[3].text, /^Material 3: notes\.md \(no slides; slide = 0\)\n# Graphs/);
+  assert.deepEqual([...slideCount.entries()], [[1, 10], [2, Infinity], [3, 0]]);
+  assert.deepEqual(skipped.map((s) => s.filename), ['photo.png', 'broken.pptx']);
+});
+
+test('ai: clean questions drops malformed ones and caps each topic at 5', () => {
+  const slideCount = new Map([[1, 10], [3, 0]]);
+  const good = (extra = {}) => ({
+    topic_id: 7, prompt: ' A loop inside a loop over 1000 items runs how many times? ', options: ['1000', '1 000 000', '2000'],
+    answer_index: 1, material_id: 1, slide: 2, quote: 'Nested loops take O(n²)', ...extra,
+  });
+  const raw = [
+    good(),
+    good({ topic_id: 99 }), // unknown topic
+    good({ material_id: 2 }), // file that was not sent
+    good({ slide: 11 }), // past the last slide
+    good({ material_id: 3, slide: 1 }), // text file has no slides
+    good({ answer_index: 3 }),
+    good({ options: ['same', 'same'] }),
+    good({ options: ['only one'] }),
+    good({ prompt: '' }),
+    ...Array.from({ length: 6 }, (_, i) => good({ prompt: `Variant ${i}` })),
+  ];
+  const cleaned = cleanQuestions(raw, [{ id: 7, name: 'Big O' }], slideCount);
+  assert.equal(cleaned.length, 5);
+  assert.deepEqual(cleaned[0], {
+    topicId: 7, prompt: 'A loop inside a loop over 1000 items runs how many times?', options: ['1000', '1 000 000', '2000'],
+    answerIndex: 1, materialId: 1, slide: 2, quote: 'Nested loops take O(n²)',
+  });
+  assert.deepEqual(cleanQuestions('nonsense', [], slideCount), []);
+});
+
+function fakeClaude(reply, status = 200) {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify(typeof reply === 'function' ? reply(requests.at(-1).body) : reply), { status });
+  };
+  return { requests, fetchImpl };
+}
+
+async function start(ai) {
+  const telegram = { enabled: false, botName: async () => null, send: async () => {} };
+  const app = createApp({ db: openDb(':memory:'), now: () => NOW, telegram, ai });
+  const server = createServer(app.handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  let cookie = '';
+  const call = async (method, path, body) => {
+    const headers = body === undefined ? {} : { 'content-type': 'application/json' };
+    if (cookie) headers.cookie = cookie;
+    const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) cookie = setCookie.split(';')[0];
+    return { status: res.status, data: await res.json() };
+  };
+  const close = () => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  };
+  return { call, close };
+}
+
+async function examWithSlides(call) {
+  await call('POST', '/api/register', { username: 'olena', password: 'correct horse' });
+  const exam = (await call('POST', '/api/exams', { title: 'Algorithms', course: 'CS', examAt: NOW + 10 * 86_400_000 })).data;
+  const topic = (await call('POST', `/api/exams/${exam.id}/topics`, { name: 'Big O' })).data;
+  const material = (await call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l1.pptx', data: PPTX.toString('base64') })).data;
+  return { exam, topic, material };
+}
+
+test('ai: generate stores questions with their slide and shows the source', async (t) => {
+  let topicId;
+  let materialId;
+  const claude = fakeClaude(() => ({
+    stop_reason: 'end_turn',
+    content: [
+      { type: 'thinking', thinking: '' },
+      { type: 'text', text: JSON.stringify({ questions: [
+        { topic_id: topicId, prompt: 'Two nested loops over 50 items: how many steps?', options: ['100', '2500', '50'], answer_index: 1, material_id: materialId, slide: 2, quote: 'Nested loops' },
+        { topic_id: topicId, prompt: 'Bad slide', options: ['a', 'b'], answer_index: 0, material_id: materialId, slide: 42, quote: '' },
+      ] }) },
+    ],
+  }));
+  const { call, close } = await start(createAi({ apiKey: 'test-key', fetchImpl: claude.fetchImpl }));
+  t.after(close);
+  const { exam, topic, material } = await examWithSlides(call);
+  topicId = topic.id;
+  materialId = material.id;
+
+  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: MODEL });
+  const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.equal(r.status, 200);
+  assert.equal(r.data.added, 1);
+  assert.deepEqual(r.data.skipped, []);
+  const [q] = r.data.topics[0].questions;
+  assert.equal(q.prompt, 'Two nested loops over 50 items: how many steps?');
+  assert.deepEqual(q.source, { materialId: material.id, filename: 'l1.pptx', slide: 2, quote: 'Nested loops' });
+
+  const [request] = claude.requests;
+  assert.equal(request.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(request.headers['x-api-key'], 'test-key');
+  assert.equal(request.body.model, MODEL);
+  assert.equal(request.body.output_config.format.type, 'json_schema');
+  assert.match(request.body.system, /practical/);
+  assert.match(request.body.messages[0].content.at(-1).text, new RegExp(`topic_id ${topic.id}: Big O`));
+
+  // A second run tells Claude which questions already exist, and the test uses the generated question.
+  await call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.match(claude.requests[1].body.messages[0].content.at(-1).text, /already has: Two nested loops/);
+  const testQuestions = (await call('GET', `/api/exams/${exam.id}/test`)).data.questions;
+  assert.equal(testQuestions.length, 2);
+
+  // Deleting the slides keeps the question and the file name it came from.
+  await call('DELETE', `/api/materials/${material.id}`);
+  const after = (await call('GET', `/api/exams/${exam.id}`)).data.topics[0].questions[0];
+  assert.deepEqual(after.source, { materialId: null, filename: 'l1.pptx', slide: 2, quote: 'Nested loops' });
+});
+
+test('ai: generate needs a key, topics and slides; errors and refusals are reported', async (t) => {
+  const off = await start(createAi({}));
+  t.after(off.close);
+  const { exam: offExam } = await examWithSlides(off.call);
+  assert.equal((await off.call('GET', `/api/exams/${offExam.id}`)).data.ai.enabled, false);
+  assert.equal((await off.call('POST', `/api/exams/${offExam.id}/generate`, {})).status, 503);
+
+  const refusing = fakeClaude({ stop_reason: 'refusal', content: [] });
+  const on = await start(createAi({ apiKey: 'k', fetchImpl: refusing.fetchImpl }));
+  t.after(on.close);
+  await on.call('POST', '/api/register', { username: 'taras', password: 'correct horse' });
+  const exam = (await on.call('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * 86_400_000 })).data;
+  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /topics first/);
+  await on.call('POST', `/api/exams/${exam.id}/topics`, { name: 'Limits' });
+  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /slides first/);
+  await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'photo.png', data: Buffer.from('png').toString('base64') });
+  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /PDF or PPTX/);
+  await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l1.pptx', data: PPTX.toString('base64') });
+  const refused = await on.call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.equal(refused.status, 422);
+  assert.equal(refusing.requests.length, 1);
+
+  const failing = fakeClaude({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 529);
+  const busy = await start(createAi({ apiKey: 'k', fetchImpl: failing.fetchImpl }));
+  t.after(busy.close);
+  const { exam: busyExam } = await examWithSlides(busy.call);
+  assert.equal((await busy.call('POST', `/api/exams/${busyExam.id}/generate`, {})).status, 503);
+});
+
+test('ai: generation is limited per day', async (t) => {
+  const claude = fakeClaude({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"questions":[]}' }] });
+  const { call, close } = await start(createAi({ apiKey: 'k', fetchImpl: claude.fetchImpl }));
+  t.after(close);
+  const { exam } = await examWithSlides(call);
+  for (let i = 0; i < 10; i++) assert.equal((await call('POST', `/api/exams/${exam.id}/generate`, {})).status, 200);
+  const limited = await call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.equal(limited.status, 429);
+  assert.equal(claude.requests.length, 10);
+});

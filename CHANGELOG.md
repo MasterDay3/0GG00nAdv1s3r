@@ -37,6 +37,9 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Mark a deadline done (and undo it); done deadlines leave the board and stop reminders, shown under "Show done".
 - `api`: ✅ Done button under Telegram reminders.
 - `ui`: Bee logo as the site icon and in the header.
+- `api`: AI practice questions from uploaded slides: Claude reads PDF, PPTX, DOCX, TXT and MD materials and writes 3–5 practical questions per topic (needs `ANTHROPIC_API_KEY`, 10 runs per user a day).
+- `ui`: "Questions from your slides" panel on the exam page; each AI question shows the file, slide and quote it comes from.
+- `db`: `question_sources` table (slide behind each AI question) and `ai_runs` table (daily limit).
 
 ### Fixed
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).

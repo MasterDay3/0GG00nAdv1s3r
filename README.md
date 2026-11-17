@@ -20,6 +20,7 @@ Environment variables:
 | `DB_PATH` | `data/dueboard.db` | SQLite file |
 | `TELEGRAM_BOT_TOKEN` | — | Turns on the Telegram bot (account linking and reminders 3 days / 1 day ahead) |
 | `COOKIE_SECURE` | `0` | `1` adds `Secure` to the session cookie; set it when the site is served over HTTPS |
+| `ANTHROPIC_API_KEY` | — | Turns on AI practice questions generated from uploaded slides (Claude API) |
 
 ## Deploy (AWS Lightsail)
 
@@ -63,3 +64,4 @@ the calendar link and upload the calendar. The extension is set up for `learn.uc
 - **Done.** Mark a deadline done on the board or with the ✅ button under a Telegram reminder: it leaves the board and gets no more reminders. Done is personal, also for group deadlines, and can be undone.
 - **Telegram bot** (needs `TELEGRAM_BOT_TOKEN`). Link from Settings → Connect Telegram. Reminders 3 days and 1 day before each deadline, a morning digest at 08:00 Kyiv time when something is due within 7 days, and a message when a groupmate adds a group deadline. Commands: `/deadlines`, `/digest` (on/off), `/help`, `/stop`. It only answers in private chats, and a chat that blocks the bot is unlinked automatically.
 - **Exam prep.** Add an exam (it appears on the board), its topics, quiz questions and practice problems, and upload lecture slides. A diagnostic test marks each topic strong (≥ 70 %) or weak, shows practice problems for weak topics, and builds a day-by-day plan counted back from the exam date.
+- **AI questions from slides** (needs `ANTHROPIC_API_KEY`). Exam → Questions from your slides → **Generate questions**: Claude (`claude-opus-5-5`) reads the uploaded PDF, PPTX, DOCX, TXT or MD files and writes 3–5 multiple-choice questions per topic, each showing the file, slide and a short quote it comes from. Only practice questions that apply the ideas to new cases, never copies of quiz or exam questions from the slides, so they cannot be used on graded Moodle quizzes. Up to 10 runs per user a day.
