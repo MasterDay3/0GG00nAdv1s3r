@@ -4,7 +4,7 @@ import { createApp } from './app.js';
 import { openDb } from './db.js';
 import { createTelegram } from './telegram.js';
 import { COMMANDS } from './bot.js';
-import { createAi } from './ai.js';
+import { createAi, aiConfigFromEnv } from './ai.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -14,13 +14,13 @@ const MINUTE = 60_000;
 if (DB_PATH !== ':memory:') mkdirSync(DB_PATH.replace(/[^/]*$/, '') || '.', { recursive: true });
 
 const telegram = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
-const ai = createAi({ apiKey: process.env.ANTHROPIC_API_KEY });
+const ai = createAi(aiConfigFromEnv(process.env));
 const app = createApp({ db: openDb(DB_PATH), telegram, ai, secureCookies: process.env.COOKIE_SECURE === '1' });
 
 createServer(app.handler).listen(PORT, HOST, () => {
   console.log(`Dueboard running at http://${HOST}:${PORT}`);
   console.log(telegram.enabled ? 'Telegram bot: on' : 'Telegram bot: off (set TELEGRAM_BOT_TOKEN to enable reminders)');
-  console.log(ai.enabled ? 'AI questions: on' : 'AI questions: off (set ANTHROPIC_API_KEY to enable them)');
+  console.log(ai.enabled ? `AI questions: on (${ai.label}, ${ai.model})` : 'AI questions: off (set AI_API_KEY to enable them)');
 });
 
 const safely = (job) => () => job().catch((err) => console.error(err));

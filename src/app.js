@@ -7,7 +7,7 @@ import { dueReminders, reminderText } from './reminders.js';
 import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
-import { createAi, MODEL } from './ai.js';
+import { createAi } from './ai.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -604,7 +604,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     for (const topic of detail.topics) {
       for (const q of topic.questions) q.source = sources.get(q.id) || null;
     }
-    return { ...detail, ai: { enabled: ai.enabled, model: MODEL } };
+    return { ...detail, ai: { enabled: ai.enabled, model: ai.model, label: ai.label } };
   }
 
   const generating = new Set();

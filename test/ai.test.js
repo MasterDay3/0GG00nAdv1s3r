@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { deflateRawSync, crc32 } from 'node:zlib';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
-import { createAi, cleanQuestions, materialBlocks, MODEL } from '../src/ai.js';
+import { createAi, cleanQuestions, materialBlocks, aiConfigFromEnv, MODEL } from '../src/ai.js';
 import { unzip, pptxSlides, docxText, kindOf } from '../src/slides.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
@@ -179,7 +179,7 @@ test('ai: generate stores questions with their slide and shows the source', asyn
   topicId = topic.id;
   materialId = material.id;
 
-  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: MODEL });
+  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: MODEL, label: 'Claude' });
   const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(r.status, 200);
   assert.equal(r.data.added, 1);
@@ -246,4 +246,88 @@ test('ai: generation is limited per day', async (t) => {
   const limited = await call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(limited.status, 429);
   assert.equal(claude.requests.length, 10);
+});
+
+test('ai: provider comes from AI_PROVIDER or the shape of the key', () => {
+  assert.equal(aiConfigFromEnv({}).provider, 'claude');
+  assert.deepEqual(aiConfigFromEnv({ ANTHROPIC_API_KEY: 'sk-ant-1' }), { provider: 'claude', apiKey: 'sk-ant-1', model: undefined });
+  assert.equal(aiConfigFromEnv({ AI_API_KEY: 'sk-ant-api03-x' }).provider, 'claude');
+  assert.equal(aiConfigFromEnv({ AI_API_KEY: 'AIzaSyX' }).provider, 'gemini');
+  assert.equal(aiConfigFromEnv({ AI_API_KEY: 'sk-0123abc' }).provider, 'deepseek');
+  assert.deepEqual(aiConfigFromEnv({ AI_PROVIDER: 'Gemini', AI_API_KEY: 'k', AI_MODEL: 'gemini-4-hydrogen' }),
+    { provider: 'gemini', apiKey: 'k', model: 'gemini-4-hydrogen' });
+  assert.throws(() => aiConfigFromEnv({ AI_PROVIDER: 'gpt', AI_API_KEY: 'k' }), /claude, gemini, deepseek/);
+});
+
+const ONE_QUESTION = (topicId, materialId) => JSON.stringify({ questions: [
+  { topic_id: topicId, prompt: 'Loop over 10 items twice: steps?', options: ['20', '100'], answer_index: 0, material_id: materialId, slide: 1, quote: 'loops' },
+] });
+
+test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
+  let ids;
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return Response.json({ id: 'int_1', status: 'completed', steps: [
+      { type: 'thought', summary: [] },
+      { type: 'model_output', content: [{ type: 'text', text: ONE_QUESTION(ids.topic, ids.material) }] },
+    ] });
+  };
+  const { call, close } = await start(createAi({ provider: 'gemini', apiKey: 'AIza-test', fetchImpl }));
+  t.after(close);
+  const { exam, topic, material } = await examWithSlides(call);
+  ids = { topic: topic.id, material: material.id };
+  await call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l2.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
+
+  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: 'gemini-3.8-flash', label: 'Gemini' });
+  const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.equal(r.status, 200);
+  assert.equal(r.data.added, 1);
+  const [req] = requests;
+  assert.equal(req.url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
+  assert.equal(req.headers['x-goog-api-key'], 'AIza-test');
+  assert.equal(req.body.response_format.mime_type, 'application/json');
+  assert.match(req.body.system_instruction, /practical/);
+  const pdf = req.body.input.find((i) => i.type === 'document');
+  assert.equal(pdf.mime_type, 'application/pdf');
+  assert.equal(Buffer.from(pdf.data, 'base64').toString(), '%PDF-1.4');
+  assert.match(req.body.input.at(-1).text, /topic_id \d+: Big O/);
+});
+
+test('ai: DeepSeek uploads PDFs to its Files API and uses JSON mode', async (t) => {
+  let ids;
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/files')) {
+      requests.push({ url, form: init.body });
+      return Response.json({ id: 'file-abc' });
+    }
+    requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return Response.json({ choices: [{ finish_reason: 'stop', message: { content: ONE_QUESTION(ids.topic, ids.material) } }] });
+  };
+  const { call, close } = await start(createAi({ provider: 'deepseek', apiKey: 'sk-ds', fetchImpl }));
+  t.after(close);
+  const { exam, topic, material } = await examWithSlides(call);
+  ids = { topic: topic.id, material: material.id };
+  await call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l2.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
+
+  const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
+  assert.equal(r.status, 200);
+  assert.equal(r.data.added, 1);
+  const [upload, chat] = requests;
+  assert.equal(upload.url, 'https://api.deepseek.com/files');
+  assert.equal(upload.form.get('purpose'), 'text_recognition');
+  assert.equal(chat.url, 'https://api.deepseek.com/chat/completions');
+  assert.equal(chat.headers.authorization, 'Bearer sk-ds');
+  assert.deepEqual(chat.body.response_format, { type: 'json_object' });
+  assert.match(chat.body.messages[0].content, /json/);
+  assert.deepEqual(chat.body.messages[1].content.find((c) => c.type === 'file'), { type: 'file', file_id: 'file-abc' });
+
+  // A cut-off answer gives a clear error instead of a broken question list.
+  const cut = await start(createAi({ provider: 'deepseek', apiKey: 'k', fetchImpl: async () => Response.json({ choices: [{ finish_reason: 'length', message: { content: '{"questions":[' } }] }) }));
+  t.after(cut.close);
+  const e = await examWithSlides(cut.call);
+  const res = await cut.call('POST', `/api/exams/${e.exam.id}/generate`, {});
+  assert.equal(res.status, 502);
+  assert.match(res.data.error, /cut off/);
 });

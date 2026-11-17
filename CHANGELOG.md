@@ -40,6 +40,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `api`: AI practice questions from uploaded slides: Claude reads PDF, PPTX, DOCX, TXT and MD materials and writes 3–5 practical questions per topic (needs `ANTHROPIC_API_KEY`, 10 runs per user a day).
 - `ui`: "Questions from your slides" panel on the exam page; each AI question shows the file, slide and quote it comes from.
 - `db`: `question_sources` table (slide behind each AI question) and `ai_runs` table (daily limit).
+- `api`: AI questions work with Claude, Gemini or DeepSeek (`AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`); the provider is picked from the key when not set.
 
 ### Fixed
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).

@@ -692,7 +692,7 @@ function sourceLine(q) {
 
 function aiBlock(exam, reload) {
   const readable = exam.materials.filter((m) => /\.(pdf|pptx|docx|txt|md)$/i.test(m.filename));
-  let hint = `Claude reads your uploaded slides and writes 3–5 practice questions per topic, each marked with the slide it comes from. Only practice questions that apply the ideas to new cases, so they can't be used on graded Moodle quizzes.`;
+  let hint = `${exam.ai.label || 'AI'} reads your uploaded slides and writes 3–5 practice questions per topic, each marked with the slide it comes from. Only practice questions that apply the ideas to new cases, so they can't be used on graded Moodle quizzes.`;
   if (!exam.ai.enabled) hint = 'AI questions are not set up on this server yet.';
   else if (!exam.topics.length) hint = 'Add the exam topics below first.';
   else if (!readable.length) hint = 'Upload your lecture slides below first (PDF or PPTX).';
