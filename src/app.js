@@ -461,36 +461,57 @@ export function createApp({
   });
 
   // Everything the account holds, as one JSON file (uploaded files are listed, not embedded: they download on their own).
+  // Its own shape, read straight from the tables, with ISO dates and ids that link topics, questions and files.
+  // Secrets stay out: no password hash, keys or the Moodle link, whose authtoken opens the student's calendar.
   route('GET', '/api/export', ({ user, res }) => {
+    const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
+    const notes = new Map(all('SELECT item_key, text FROM notes WHERE user_id = ?', user.id).map((n) => [n.item_key, n.text]));
     const exams = all('SELECT * FROM exams WHERE user_id = ? ORDER BY exam_at', user.id).map((exam) => {
-      const detail = withAi(examDetail(exam));
+      const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
+      const sources = new Map(all(
+        `SELECT s.* FROM question_sources s JOIN questions q ON q.id = s.question_id
+         JOIN topics t ON t.id = q.topic_id WHERE t.exam_id = ?`, exam.id,
+      ).map((x) => [x.question_id, { fileId: x.material_id, file: x.filename, slide: x.slide, quote: x.quote }]));
+      const questions = examQuestions(exam.id);
+      const problems = all('SELECT p.* FROM problems p JOIN topics t ON t.id = p.topic_id WHERE t.exam_id = ? ORDER BY p.id', exam.id);
       return {
-        title: detail.title, course: detail.course, examAt: new Date(detail.examAt).toISOString(),
-        topics: detail.topics.map((t) => ({
+        id: exam.id, title: exam.title, course: exam.course, examAt: iso(exam.exam_at), note: notes.get(`e${exam.id}`) || '',
+        topics: topics.map((t) => ({
+          id: t.id,
           name: t.name,
-          questions: t.questions.map((q) => ({ prompt: q.prompt, options: q.options, answer: q.options[q.answerIndex], source: q.source })),
-          problems: t.problems.map((p) => p.text),
+          questions: questions.filter((q) => q.topicId === t.id).map((q) => ({
+            id: q.id, prompt: q.prompt, options: q.options, answerIndex: q.answerIndex, source: sources.get(q.id) || null,
+          })),
+          problems: problems.filter((x) => x.topic_id === t.id).map((x) => x.text),
         })),
-        files: detail.materials.map((m) => ({ name: m.filename, bytes: m.size, uploadedAt: new Date(m.createdAt).toISOString() })),
-        testAttempts: detail.history.map((a) => ({ takenAt: new Date(a.takenAt).toISOString(), correct: a.correct, total: a.total, topics: a.topics })),
+        files: all('SELECT id, filename, size, created_at FROM materials WHERE exam_id = ? ORDER BY id', exam.id)
+          .map((m) => ({ id: m.id, name: m.filename, bytes: m.size, uploadedAt: iso(m.created_at) })),
+        testAttempts: all('SELECT * FROM attempts WHERE exam_id = ? ORDER BY id', exam.id).map((a) => ({
+          takenAt: iso(a.created_at), topics: JSON.parse(a.result), wrongQuestionIds: JSON.parse(a.wrong || '[]'),
+        })),
       };
     });
+    const group = user.group_id ? one('SELECT name FROM study_groups WHERE id = ?', user.group_id) : null;
     const data = {
-      exportedAt: new Date(now()).toISOString(),
-      account: me(user),
+      exportedAt: iso(now()),
+      account: {
+        username: user.username,
+        group: group?.name || null,
+        moodleConnected: Boolean(user.ics_url),
+        lastMoodleSync: iso(user.last_sync_at),
+        telegramLinked: Boolean(user.tg_chat_id),
+        morningDigest: Boolean(user.tg_digest),
+        reminders: parseReminders(user.tg_remind),
+        calendarFeed: Boolean(user.cal_token_hash),
+      },
       deadlines: boardItems(user).filter((item) => item.source !== 'exam').map((item) => ({
-        title: item.title, course: item.course, dueAt: new Date(item.dueAt).toISOString(), source: item.source,
+        id: item.id, title: item.title, course: item.course, dueAt: iso(item.dueAt), source: item.source,
         url: item.url, note: item.note, done: item.done,
       })),
       exams,
     };
-    const day = new Date(now()).toISOString().slice(0, 10);
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-disposition': `attachment; filename="dueboard-${user.username}-${day}.json"`,
-      'cache-control': 'no-store',
-    });
-    res.end(JSON.stringify(data, null, 2));
+    res.setHeader('content-disposition', `attachment; filename="dueboard-${user.username}-${iso(now()).slice(0, 10)}.json"`);
+    return data;
   });
 
   route('POST', '/api/logout-all', ({ user, res }) => {

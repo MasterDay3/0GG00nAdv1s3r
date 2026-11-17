@@ -1,6 +1,6 @@
 // Offline support. Network first, so an online visit always gets the newest code and data;
 // without a connection the last saved page and board are shown instead.
-const SHELL_CACHE = 'dueboard-shell-v1';
+const SHELL_CACHE = 'dueboard-shell-v2';
 const DATA_CACHE = 'dueboard-data'; // the page clears it on log out
 const SHELL = ['/', '/app.js', '/style.css', '/tokens.css', '/base.css', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png'];
 // Read-only answers worth showing offline. Everything else (writes, files, AI) needs the network.
@@ -39,7 +39,8 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (request.mode === 'navigate') {
+  // Only the app page itself is a navigation worth saving: a download or a feed opened as a page must not replace it.
+  if (request.mode === 'navigate' && url.pathname === '/') {
     event.respondWith(networkFirst(request, SHELL_CACHE, '/'));
   } else if (SHELL.includes(url.pathname)) {
     event.respondWith(networkFirst(request, SHELL_CACHE));

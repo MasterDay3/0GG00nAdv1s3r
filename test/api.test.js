@@ -883,6 +883,8 @@ test('account: export downloads all your data as JSON, without secrets', async (
   const { id: topic } = (await call('POST', `/api/exams/${examId}/topics`, { name: 'Limits' })).data;
   await call('POST', `/api/topics/${topic}/questions`, { prompt: '1+1?', options: ['1', '2'], answerIndex: 1 });
   await call('POST', '/api/extension/key', {});
+  await call('PUT', '/api/notes', { key: `e${examId}`, text: 'Bring a calculator' });
+  await call('PUT', '/api/settings', { icsUrl: 'https://moodle.example/export_execute.php?authtoken=secret-token' });
 
   const res = await call('GET', '/api/export');
   assert.equal(res.status, 200);
@@ -890,8 +892,11 @@ test('account: export downloads all your data as JSON, without secrets', async (
   const data = res.data;
   assert.equal(data.account.username, 'mykola');
   assert.deepEqual(data.deadlines.map((d) => [d.title, d.note]), [['Essay', 'Use 3 sources']]);
-  assert.equal(data.exams[0].topics[0].questions[0].answer, '2');
+  assert.equal(data.exams[0].topics[0].questions[0].answerIndex, 1);
+  assert.equal(data.exams[0].note, 'Bring a calculator', 'exam notes are exported too');
+  assert.match(data.exams[0].examAt, /^\d{4}-\d\d-\d\dT/);
+  assert.equal(data.account.moodleConnected, true);
   const text = JSON.stringify(data);
-  assert.doesNotMatch(text, /pass_hash|ext_key|anna/);
+  assert.doesNotMatch(text, /pass_hash|ext_key|anna|authtoken|secret-token/);
   assert.equal((await client(base)('GET', '/api/export')).status, 401);
 });

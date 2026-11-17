@@ -822,6 +822,23 @@ function calendarCard() {
   return box;
 }
 
+// Fetched first, so an expired session shows an error instead of saving the error as the "data" file.
+async function downloadExport() {
+  const res = await fetch('/api/export').catch(() => null);
+  if (!res) return toast('Немає з’єднання з інтернетом', true);
+  if (!res.ok) {
+    if (res.status === 401) { me = null; forgetSavedData(); render(); }
+    return toast(res.status === 401 ? 'Сесія закінчилася. Увійдіть знову.' : 'Не вдалося підготувати файл', true);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'dueboard.json';
+  const url = URL.createObjectURL(await res.blob());
+  const a = h('a', { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function accountCard() {
   const signedOut = () => { me = null; forgetSavedData(); location.hash = '#/board'; render(); };
 
@@ -854,7 +871,7 @@ function accountCard() {
 
   return [
     h('p', { class: 'small' },
-      h('a', { href: '/api/export', download: '' }, 'Завантажити всі мої дані'),
+      h('button', { type: 'button', class: 'link', onclick: downloadExport }, 'Завантажити всі мої дані'),
       h('span', { class: 'muted' }, ': дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
     h('details', {}, h('summary', {}, 'Змінити пароль'), passwordForm),
     h('details', {},
