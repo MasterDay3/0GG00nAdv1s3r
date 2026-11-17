@@ -604,3 +604,65 @@ test('account: password reset with a code sent to the linked Telegram chat', asy
   assert.equal((await anon('POST', '/api/password-reset', { username: 'mykola' })).status, 200);
   assert.equal((await anon('POST', '/api/password-reset', { username: 'mykola' })).status, 429);
 });
+
+test('edit: own deadlines only, a new date brings reminders back', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const anna = await signedUp(base, 'anna');
+  const { code } = (await mykola('POST', '/api/group', { name: 'CS-2' })).data;
+  await anna('POST', '/api/group/join', { code });
+  const { id } = (await mykola('POST', '/api/deadlines', { title: 'Essay', dueAt: NOW + 20 * HOUR, shared: true })).data;
+  await mykola('POST', '/api/import-ics', { ics: FEED });
+  const moodleId = (await mykola('GET', '/api/deadlines')).data.items.find((i) => i.source === 'moodle').id;
+  const { code: link } = (await mykola('POST', '/api/telegram/link', {})).data;
+  await app.handleTelegramUpdate({ message: { chat: { id: 5, type: 'private' }, text: `/start ${link}` } });
+  await app.runReminders();
+  const before = sent.filter((m) => /Essay/.test(m.text)).length;
+  assert.equal(before, 1);
+
+  const edit = { title: 'Essay, final draft', course: 'Ethics', url: 'https://learn.example/e', dueAt: NOW + 2.5 * DAY };
+  assert.equal((await anna('PUT', `/api/deadlines/${id}`, edit)).status, 404, 'only the author edits');
+  assert.equal((await mykola('PUT', `/api/deadlines/${moodleId}`, edit)).status, 404, 'Moodle deadlines are not edited here');
+  assert.equal((await mykola('PUT', `/api/deadlines/${id}`, { ...edit, url: 'javascript:alert(1)' })).status, 400);
+  assert.equal((await mykola('PUT', `/api/deadlines/${id}`, edit)).status, 200);
+  const item = (await anna('GET', '/api/deadlines')).data.items.find((i) => i.id === id);
+  assert.deepEqual([item.title, item.course, item.url, item.dueAt], [edit.title, 'Ethics', edit.url, edit.dueAt]);
+
+  await app.runReminders();
+  assert.equal(sent.filter((m) => /Essay, final draft/.test(m.text)).length, 1, 'the 3-day reminder comes for the new date');
+});
+
+test('edit: exam, topic, question and problem, owner-only', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const anna = await signedUp(base, 'anna');
+  const { id: examId } = (await mykola('POST', '/api/exams', { title: 'Calc', examAt: NOW + 5 * DAY })).data;
+  const { id: other } = (await anna('POST', '/api/exams', { title: 'Other', examAt: NOW + 5 * DAY })).data;
+  const { id: t1 } = (await mykola('POST', `/api/exams/${examId}/topics`, { name: 'Limits' })).data;
+  const { id: t2 } = (await mykola('POST', `/api/exams/${examId}/topics`, { name: 'Series' })).data;
+  const { id: annaTopic } = (await anna('POST', `/api/exams/${other}/topics`, { name: 'Hers' })).data;
+  const { id: q } = (await mykola('POST', `/api/topics/${t1}/questions`, { prompt: '1+1?', options: ['1', '2'], answerIndex: 1 })).data;
+  const { id: p } = (await mykola('POST', `/api/topics/${t1}/problems`, { text: 'Old problem' })).data;
+
+  assert.equal((await anna('PUT', `/api/exams/${examId}`, { title: 'X', examAt: NOW })).status, 404);
+  assert.equal((await mykola('PUT', `/api/exams/${examId}`, { title: 'Calculus I', course: 'Math', examAt: NOW + 6 * DAY })).status, 200);
+  assert.equal((await mykola('PUT', `/api/topics/${t1}`, { name: 'Limits & continuity' })).status, 200);
+  assert.equal((await anna('PUT', `/api/topics/${t1}`, { name: 'Mine now' })).status, 404);
+  const question = { prompt: '2+2?', options: ['3', '4', '5'], answerIndex: 1 };
+  assert.equal((await mykola('PUT', `/api/questions/${q}`, { ...question, answerIndex: 3 })).status, 400);
+  assert.equal((await anna('PUT', `/api/questions/${q}`, question)).status, 404);
+  assert.equal((await mykola('PUT', `/api/questions/${q}`, { ...question, topicId: annaTopic })).status, 404, 'not into another user\'s topic');
+  assert.equal((await mykola('PUT', `/api/questions/${q}`, { ...question, topicId: t2 })).status, 200);
+  assert.equal((await mykola('PUT', `/api/problems/${p}`, { text: 'New problem' })).status, 200);
+  assert.equal((await anna('PUT', `/api/problems/${p}`, { text: 'Hacked' })).status, 404);
+
+  const exam = (await mykola('GET', `/api/exams/${examId}`)).data;
+  assert.deepEqual([exam.title, exam.course, exam.examAt], ['Calculus I', 'Math', NOW + 6 * DAY]);
+  assert.deepEqual(exam.topics.map((t) => [t.name, t.questions.map((x) => x.prompt), t.problems.map((x) => x.text)]), [
+    ['Limits & continuity', [], ['New problem']],
+    ['Series', ['2+2?'], []],
+  ]);
+  assert.deepEqual(exam.topics[1].questions[0].options, ['3', '4', '5']);
+});

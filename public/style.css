@@ -379,3 +379,10 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .auth-foot { margin-top: var(--space-sm); text-align: center; }
 .auth .panel > h2 { margin-bottom: var(--space-sm); }
 .setting-body > details + details { margin-top: var(--space-sm); }
+
+/* Inline edit forms */
+.item.editing { display: block; }
+.edit-form > * + * { margin-top: var(--space-sm); }
+.edit-form.grow { flex: 1; }
+.q .head > .tools { display: flex; gap: var(--space-2xs); flex-shrink: 0; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); }

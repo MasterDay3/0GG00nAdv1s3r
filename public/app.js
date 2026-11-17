@@ -304,6 +304,15 @@ function deadlineRow(item, now, reload) {
         },
       }, item.done ? 'Повернути' : 'Виконано') : null,
       item.canDelete ? h('button', {
+        type: 'button', class: 'secondary small',
+        onclick: (e) => {
+          const row = e.currentTarget.closest('li');
+          row.classList.add('editing');
+          row.replaceChildren(deadlineEditForm(item, reload));
+          row.querySelector('input').focus();
+        },
+      }, 'Змінити') : null,
+      item.canDelete ? h('button', {
         type: 'button', class: 'danger small',
         onclick: async () => {
           if (!confirm(`Видалити «${item.title}»?`)) return;
@@ -311,6 +320,35 @@ function deadlineRow(item, now, reload) {
         },
       }, 'Видалити') : null),
     noteEditor(item));
+}
+
+// Edit a deadline the user added (Moodle ones change in Moodle).
+function deadlineEditForm(item, reload) {
+  const form = h('form', {
+    class: 'edit-form',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const f = formData(form);
+      const ok = await act(() => api('PUT', `/api/deadlines/${item.id}`, {
+        title: f.title, course: f.course, url: f.url, dueAt: parseLocalInput(f.dueAt),
+      }), 'Збережено');
+      if (ok) reload();
+    },
+  },
+  h('div', { class: 'row' },
+    h('label', { class: 'grow' }, 'Що здати', h('input', { name: 'title', required: true, maxlength: 200, value: item.title })),
+    h('label', {}, 'Курс', h('input', { name: 'course', maxlength: 100, value: item.course }))),
+  h('div', { class: 'row' },
+    h('label', {}, 'Термін', h('input', { name: 'dueAt', type: 'datetime-local', required: true, value: localInputValue(item.dueAt) })),
+    h('label', { class: 'grow' }, 'Посилання (необов’язково)', h('input', { name: 'url', type: 'url', value: item.url, placeholder: 'https://' }))),
+  saveCancel(reload));
+  return form;
+}
+
+function saveCancel(onCancel) {
+  return h('div', { class: 'row' },
+    h('button', { type: 'submit', class: 'shrink' }, 'Зберегти'),
+    h('button', { type: 'button', class: 'secondary shrink', onclick: onCancel }, 'Скасувати'));
 }
 
 function fmtTime(ms) {
@@ -762,29 +800,76 @@ function problemForm(topic, reload) {
   return h('details', {}, h('summary', {}, 'Додати задачу'), form);
 }
 
-function topicBlock(topic, reload) {
+// Replaces a block with its edit form; Cancel reloads the page section.
+function editButton(makeForm) {
+  return h('button', {
+    type: 'button', class: 'secondary small',
+    onclick: (e) => {
+      const block = e.currentTarget.closest('[data-edit]');
+      block.replaceChildren(makeForm());
+      block.querySelector('input, textarea')?.focus();
+    },
+  }, 'Змінити');
+}
+
+function topicBlock(topic, reload, topics) {
   const del = (path, what) => async () => {
     if (!confirm(`Видалити ${what}?`)) return;
     if (await act(() => api('DELETE', path), 'Видалено')) reload();
   };
+  const save = (path, body) => async (e) => {
+    e.preventDefault();
+    if (await act(() => api('PUT', path, body(formData(e.target))), 'Збережено')) reload();
+  };
+
+  const renameForm = () => h('form', { class: 'edit-form', onsubmit: save(`/api/topics/${topic.id}`, (f) => ({ name: f.name })) },
+    h('label', {}, 'Назва теми', h('input', { name: 'name', required: true, maxlength: 120, value: topic.name })),
+    saveCancel(reload));
+
+  const questionEdit = (q) => () => h('form', {
+    class: 'edit-form',
+    onsubmit: save(`/api/questions/${q.id}`, (f) => ({
+      prompt: f.prompt,
+      options: f.options.split('\n').map((s) => s.trim()).filter(Boolean),
+      answerIndex: Number(f.correct) - 1,
+      topicId: Number(f.topicId),
+    })),
+  },
+  h('label', {}, 'Питання', h('textarea', { name: 'prompt', required: true, maxlength: 1000 }, q.prompt)),
+  h('div', { class: 'row' },
+    h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (2–6)', h('textarea', { name: 'options', required: true }, q.options.join('\n'))),
+    h('label', {}, '№ правильного', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: String(q.answerIndex + 1), required: true }))),
+  h('label', {}, 'Тема', h('select', { name: 'topicId' },
+    topics.map((t) => h('option', { value: String(t.id), selected: t.id === topic.id }, t.name)))),
+  saveCancel(reload));
+
+  const problemEdit = (p) => () => h('form', { class: 'edit-form', onsubmit: save(`/api/problems/${p.id}`, (f) => ({ text: f.text })) },
+    h('label', {}, 'Задача', h('textarea', { name: 'text', required: true, maxlength: 4000 }, p.text)),
+    saveCancel(reload));
+
   return h('div', { class: 'topic' },
-    h('div', { class: 'head' },
+    h('div', { class: 'head', 'data-edit': '' },
       h('h3', {}, topic.name),
       h('div', { class: 'tools' },
         h('span', { class: 'chip' }, plural(topic.questions.length, QUESTIONS)),
         h('span', { class: 'chip' }, plural(topic.problems.length, PROBLEMS)),
+        editButton(renameForm),
         h('button', { type: 'button', class: 'danger small', onclick: del(`/api/topics/${topic.id}`, 'тему з усіма її питаннями') }, 'Видалити тему'))),
     // Collapsed, so the answers are not seen before taking the test.
     topic.questions.length ? h('details', { class: 'qlist' },
       h('summary', {}, `Показати питання й відповіді (${topic.questions.length})`),
-      topic.questions.map((q) => h('div', { class: 'q' },
+      topic.questions.map((q) => h('div', { class: 'q', 'data-edit': '' },
         h('div', { class: 'head' }, h('span', { class: 'pre' }, q.prompt),
-          h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'питання') }, 'Видалити')),
+          h('div', { class: 'tools' },
+            editButton(questionEdit(q)),
+            h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'питання') }, 'Видалити'))),
         h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))),
         sourceLine(q)))) : null,
-    topic.problems.map((p) => h('div', { class: 'q' },
+    topic.problems.map((p) => h('div', { class: 'q', 'data-edit': '' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, h('span', { class: 'kind' }, 'Задача'), p.text),
-        h('button', { type: 'button', class: 'danger small', onclick: del(`/api/problems/${p.id}`, 'задачу') }, 'Видалити')))),
+        h('div', { class: 'tools' },
+          editButton(problemEdit(p)),
+          h('button', { type: 'button', class: 'danger small', onclick: del(`/api/problems/${p.id}`, 'задачу') }, 'Видалити'))))),
     questionForm(topic, reload),
     problemForm(topic, reload));
 }
@@ -931,20 +1016,33 @@ async function showExam(id) {
 
   setView(
     h('a', { class: 'back', href: '#/prep' }, 'Усі екзамени'),
-    h('div', { class: 'head page-head' },
+    h('div', { class: 'head page-head', 'data-edit': '' },
       h('div', {},
         exam.course ? h('p', { class: 'muted' }, exam.course) : null,
         h('h1', {}, exam.title),
         h('div', { class: 'exam-meta' },
           h('time', { class: 'num', datetime: new Date(exam.examAt).toISOString() }, fmtDate(exam.examAt)),
           h('span', { class: 'chip amber' }, relative(exam.examAt)))),
-      h('button', {
+      h('div', { class: 'tools' }, h('button', {
         type: 'button', class: 'danger',
         onclick: async () => {
           if (!confirm(`Видалити екзамен «${exam.title}» з усіма темами й файлами?`)) return;
           if (await act(() => api('DELETE', `/api/exams/${id}`), 'Екзамен видалено')) location.hash = '#/prep';
         },
-      }, 'Видалити екзамен')),
+      }, 'Видалити екзамен'),
+      editButton(() => h('form', {
+        class: 'edit-form grow',
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const f = formData(e.target);
+          if (await act(() => api('PUT', `/api/exams/${id}`, { title: f.title, course: f.course, examAt: parseLocalInput(f.examAt) }), 'Збережено')) reload();
+        },
+      },
+      h('div', { class: 'row' },
+        h('label', { class: 'grow' }, 'Екзамен', h('input', { name: 'title', required: true, maxlength: 200, value: exam.title })),
+        h('label', {}, 'Курс', h('input', { name: 'course', maxlength: 100, value: exam.course }))),
+      h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true, value: localInputValue(exam.examAt) })),
+      saveCancel(reload))))),
     h('section', { class: 'panel' },
       h('div', { class: 'head' },
         h('h2', {}, 'Діагностичний тест'),
@@ -957,7 +1055,7 @@ async function showExam(id) {
     aiBlock(exam, reload),
     h('section', { class: 'panel' },
       h('h2', {}, 'Теми й питання'),
-      exam.topics.map((t) => topicBlock(t, reload)),
+      exam.topics.map((t) => topicBlock(t, reload, exam.topics)),
       h('div', { class: 'topic' }, topicForm)),
     materialsBlock(exam, reload),
   );

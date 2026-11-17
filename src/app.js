@@ -490,11 +490,17 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   route('GET', '/api/deadlines', ({ user }) => ({ now: now(), items: boardItems(user) }));
 
+  function deadlineFields(body) {
+    return {
+      title: text(body.title, 'Назва'),
+      course: text(body.course, 'Курс', { max: 100, required: false }),
+      dueAt: timestamp(body.dueAt, 'Термін'),
+      url: link(body.url),
+    };
+  }
+
   route('POST', '/api/deadlines', ({ user, body }) => {
-    const title = text(body.title, 'Назва');
-    const course = text(body.course, 'Курс', { max: 100, required: false });
-    const dueAt = timestamp(body.dueAt, 'Термін');
-    const url = link(body.url);
+    const { title, course, dueAt, url } = deadlineFields(body);
     const shared = body.shared === true;
     if (shared && !user.group_id) throw new HttpError(400, 'Щоб ділитися дедлайнами, приєднайтеся до групи');
     const { lastInsertRowid } = run(
@@ -507,6 +513,21 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     // Not awaited: the response should not wait for Telegram.
     if (shared) notifyGroup(user, { source: 'group', course, title, url, dueAt }).catch((err) => console.error(err));
     return { id, key: `d${id}` };
+  });
+
+  // Only the author edits a deadline they added; Moodle ones come from Moodle and would be overwritten by the next sync.
+  route('PUT', '/api/deadlines/:id', ({ user, params, body }) => {
+    const deadline = one(
+      `SELECT * FROM deadlines WHERE id = ? AND created_by = ? AND source != 'moodle'
+         AND (owner_user_id = ? OR (group_id IS NOT NULL AND group_id = ?))`,
+      params.id, user.id, user.id, user.group_id ?? -1,
+    );
+    if (!deadline) throw new HttpError(404, 'Дедлайн не знайдено');
+    const { title, course, dueAt, url } = deadlineFields(body);
+    run('UPDATE deadlines SET title = ?, course = ?, url = ?, due_at = ? WHERE id = ?', title, course, url, dueAt, params.id);
+    // A new date means new reminders, for everyone who sees the deadline.
+    if (dueAt !== deadline.due_at) run('DELETE FROM reminders_sent WHERE item_key = ?', `d${params.id}`);
+    return { ok: true };
   });
 
   route('DELETE', '/api/deadlines/:id', ({ user, params }) => {
@@ -590,15 +611,29 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     all('SELECT id, title, course, exam_at FROM exams WHERE user_id = ? ORDER BY exam_at', user.id)
       .map((e) => ({ id: e.id, title: e.title, course: e.course, examAt: e.exam_at })));
 
+  function examFields(body) {
+    return {
+      title: text(body.title, 'Назва екзамену'),
+      course: text(body.course, 'Курс', { max: 100, required: false }),
+      examAt: timestamp(body.examAt, 'Дата екзамену'),
+    };
+  }
+
   route('POST', '/api/exams', ({ user, body }) => {
-    const title = text(body.title, 'Назва екзамену');
-    const course = text(body.course, 'Курс', { max: 100, required: false });
-    const examAt = timestamp(body.examAt, 'Дата екзамену');
+    const { title, course, examAt } = examFields(body);
     const { lastInsertRowid } = run('INSERT INTO exams (user_id, course, title, exam_at) VALUES (?, ?, ?, ?)', user.id, course, title, examAt);
     return { id: Number(lastInsertRowid) };
   });
 
   route('GET', '/api/exams/:id', ({ user, params }) => withAi(examDetail(ownExam(user, params.id))));
+
+  route('PUT', '/api/exams/:id', ({ user, params, body }) => {
+    const exam = ownExam(user, params.id);
+    const { title, course, examAt } = examFields(body);
+    run('UPDATE exams SET title = ?, course = ?, exam_at = ? WHERE id = ?', title, course, examAt, exam.id);
+    if (examAt !== exam.exam_at) run('DELETE FROM reminders_sent WHERE item_key = ?', `e${exam.id}`);
+    return { ok: true };
+  });
 
   route('DELETE', '/api/exams/:id', ({ user, params }) => {
     ownExam(user, params.id);
@@ -614,14 +649,19 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     return { id: Number(lastInsertRowid), name };
   });
 
+  route('PUT', '/api/topics/:id', ({ user, params, body }) => {
+    ownTopic(user, params.id);
+    run('UPDATE topics SET name = ? WHERE id = ?', text(body.name, 'Тема', { max: 120 }), params.id);
+    return { ok: true };
+  });
+
   route('DELETE', '/api/topics/:id', ({ user, params }) => {
     ownTopic(user, params.id);
     run('DELETE FROM topics WHERE id = ?', params.id);
     return { ok: true };
   });
 
-  route('POST', '/api/topics/:id/questions', ({ user, params, body }) => {
-    ownTopic(user, params.id);
+  function questionFields(body) {
     const prompt = text(body.prompt, 'Питання', { max: 1000 });
     if (!Array.isArray(body.options) || body.options.length < 2 || body.options.length > 6) {
       throw new HttpError(400, 'Питанню потрібно 2–6 варіантів відповіді');
@@ -630,11 +670,44 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     if (!Number.isInteger(body.answerIndex) || body.answerIndex < 0 || body.answerIndex >= options.length) {
       throw new HttpError(400, 'Вкажіть правильний варіант');
     }
+    return { prompt, options, answerIndex: body.answerIndex };
+  }
+
+  // A question or problem of one of the user's exams.
+  // table is one of two constants ('questions' | 'problems'), never user input.
+  function ownItem(user, table, id, notFound) {
+    const row = one(
+      `SELECT x.* FROM ${table} x JOIN topics t ON t.id = x.topic_id JOIN exams e ON e.id = t.exam_id
+       WHERE x.id = ? AND e.user_id = ?`, id, user.id,
+    );
+    if (!row) throw new HttpError(404, notFound);
+    return row;
+  }
+
+  route('POST', '/api/topics/:id/questions', ({ user, params, body }) => {
+    ownTopic(user, params.id);
+    const { prompt, options, answerIndex } = questionFields(body);
     const { lastInsertRowid } = run(
       'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
-      params.id, prompt, JSON.stringify(options), body.answerIndex,
+      params.id, prompt, JSON.stringify(options), answerIndex,
     );
     return { id: Number(lastInsertRowid) };
+  });
+
+  // Editing keeps the question's topic; moving it is topicId (another topic of the same exam).
+  route('PUT', '/api/questions/:id', ({ user, params, body }) => {
+    const question = ownItem(user, 'questions', params.id, 'Питання не знайдено');
+    const { prompt, options, answerIndex } = questionFields(body);
+    let topicId = question.topic_id;
+    if (body.topicId !== undefined && body.topicId !== topicId) {
+      const target = Number.isInteger(body.topicId) && ownTopic(user, body.topicId);
+      const current = one('SELECT exam_id FROM topics WHERE id = ?', topicId);
+      if (!target || target.exam_id !== current.exam_id) throw new HttpError(400, 'Тему не знайдено');
+      topicId = target.id;
+    }
+    run('UPDATE questions SET topic_id = ?, prompt = ?, options = ?, answer_index = ? WHERE id = ?',
+      topicId, prompt, JSON.stringify(options), answerIndex, params.id);
+    return { ok: true };
   });
 
   route('DELETE', '/api/questions/:id', ({ user, params }) => {
@@ -651,6 +724,12 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const problem = text(body.text, 'Задача', { max: 4000 });
     const { lastInsertRowid } = run('INSERT INTO problems (topic_id, text) VALUES (?, ?)', params.id, problem);
     return { id: Number(lastInsertRowid) };
+  });
+
+  route('PUT', '/api/problems/:id', ({ user, params, body }) => {
+    ownItem(user, 'problems', params.id, 'Задачу не знайдено');
+    run('UPDATE problems SET text = ? WHERE id = ?', text(body.text, 'Задача', { max: 4000 }), params.id);
+    return { ok: true };
   });
 
   route('DELETE', '/api/problems/:id', ({ user, params }) => {

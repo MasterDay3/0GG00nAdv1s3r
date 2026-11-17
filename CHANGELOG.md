@@ -22,6 +22,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `ui`: Edit a deadline you added (title, course, date, link); a new date brings its reminders back.
+- `ui`: Edit an exam (name, course, date), rename a topic, edit a question (text, options, right answer, topic) or a practice problem, AI questions included.
 - `infra`: CHANGELOG.md to track changes from the first commit.
 - `infra`: Zero-dependency Node.js server (`node:http`, `node:sqlite`), `npm start` / `npm test`.
 - `auth`: Username + password accounts (scrypt hashes, HttpOnly session cookies).
