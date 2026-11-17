@@ -42,6 +42,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `db`: `question_sources` table (slide behind each AI question) and `ai_runs` table (daily limit).
 - `api`: AI questions work with Claude, Gemini or DeepSeek (`AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`); the provider is picked from the key when not set.
 - `ui`: Diagnostic test one question at a time: a wrong pick turns red and the right answer green at once, with the slide it comes from; a results screen with score, per-topic bars and a review of mistakes. Answers in the topic list are hidden until opened.
+- `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
 - `api`: Telegram reminder times are shown in Kyiv time instead of the server's time zone (UTC on AWS).

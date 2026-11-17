@@ -10,7 +10,8 @@ export const PROVIDERS = {
   gemini: { model: 'gemini-3.8-flash', label: 'Gemini', fallbacks: ['gemini-3-flash-preview', 'gemini-2.5-flash'] },
   deepseek: { model: 'deepseek-flash', label: 'DeepSeek' },
 };
-export const PER_TOPIC = { min: 3, max: 5 };
+// How many questions one run writes: the student picks the number.
+export const COUNT = { min: 1, max: 30, default: 10 };
 const MAX_REQUEST = 24 * 1024 * 1024; // the API takes up to 32 MB per request
 const TIMEOUT = 5 * 60_000;
 
@@ -18,13 +19,14 @@ const SYSTEM = `You write practice questions for a university student who is pre
 They are built only from the student's own lecture materials, which follow as numbered materials.
 
 Rules:
-- Write ${PER_TOPIC.min}-${PER_TOPIC.max} multiple-choice questions for every topic you are given. Use only what the materials teach about that topic; if they say nothing about it, write no questions for it.
+- Write exactly as many multiple-choice questions as the student asks for. Spread them over the main topics the materials teach, roughly in proportion to how much the materials say about each. Use only what the materials teach.
+- Give every question a short topic name (topic), 1-4 words like a chapter title, the same name for every question on that topic. If the student already has topics, reuse those exact names when a question fits one of them.
 - Every question is practical: the student has to apply an idea to a new case, such as new numbers to work out, a short scenario, code or a situation to predict, or the right method to pick for a problem. No questions that only ask to recall a definition or a sentence from the slides.
 - Never copy a question, an exercise or a worked example from the materials, and never reproduce questions from a quiz, test or past exam found in them. Change the setting and the values so the question cannot be used to answer a graded Moodle quiz.
 - 3-5 answer options, exactly one correct. Wrong options should be mistakes a student really makes. answer_index is the 0-based index of the correct option.
 - For each question give the material it comes from (material_id), the slide or page it is based on (slide, counted from 1; use 0 when the material has no slides or pages) and a short quote of up to 20 words from that slide showing the idea being tested (quote).
 - Write in the language of the materials.
-- Do not repeat questions the student already has; they are listed under each topic.`;
+- Do not repeat questions the student already has; they are listed under their topics.`;
 
 const SCHEMA = {
   type: 'object',
@@ -36,9 +38,9 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['topic_id', 'prompt', 'options', 'answer_index', 'material_id', 'slide', 'quote'],
+        required: ['topic', 'prompt', 'options', 'answer_index', 'material_id', 'slide', 'quote'],
         properties: {
-          topic_id: { type: 'integer' },
+          topic: { type: 'string' },
           prompt: { type: 'string' },
           options: { type: 'array', items: { type: 'string' } },
           answer_index: { type: 'integer' },
@@ -98,13 +100,14 @@ export function materialBlocks(materials) {
   return { blocks, slideCount, skipped };
 }
 
-// Keeps only well-formed questions that point at a real topic and slide, at most PER_TOPIC.max per topic.
-export function cleanQuestions(raw, topics, slideCount) {
-  const topicIds = new Set(topics.map((t) => t.id));
-  const perTopic = new Map();
+// Keeps only well-formed questions that point at a real file and slide, at most `count` of them.
+export function cleanQuestions(raw, count, slideCount) {
   const result = [];
   for (const q of Array.isArray(raw) ? raw : []) {
-    if (!q || !topicIds.has(q.topic_id) || !slideCount.has(q.material_id)) continue;
+    if (result.length >= count) break;
+    if (!q || !slideCount.has(q.material_id)) continue;
+    const topic = typeof q.topic === 'string' ? q.topic.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
+    if (!topic) continue;
     const prompt = typeof q.prompt === 'string' ? q.prompt.trim() : '';
     const options = Array.isArray(q.options) ? q.options.map((o) => (typeof o === 'string' ? o.trim() : '')) : [];
     if (!prompt || prompt.length > 1000) continue;
@@ -114,11 +117,8 @@ export function cleanQuestions(raw, topics, slideCount) {
     // A file without slides (DOCX, TXT, MD) has no slide numbers to point at, even if its headings say "Slide 2".
     const slide = Number.isInteger(q.slide) && slideCount.get(q.material_id) !== 0 ? q.slide : 0;
     if (slide < 0 || slide > slideCount.get(q.material_id)) continue;
-    const count = perTopic.get(q.topic_id) || 0;
-    if (count >= PER_TOPIC.max) continue;
-    perTopic.set(q.topic_id, count + 1);
     const quote = typeof q.quote === 'string' ? q.quote.trim().slice(0, 300) : '';
-    result.push({ topicId: q.topic_id, prompt, options, answerIndex: q.answer_index, materialId: q.material_id, slide, quote });
+    result.push({ topic, prompt, options, answerIndex: q.answer_index, materialId: q.material_id, slide, quote });
   }
   return result;
 }
@@ -136,7 +136,7 @@ export function aiConfigFromEnv(env) {
   return { provider, apiKey, model: env.AI_MODEL || undefined };
 }
 
-const JSON_EXAMPLE = '{"questions":[{"topic_id":1,"prompt":"…","options":["…","…","…"],"answer_index":0,'
+const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","options":["…","…","…"],"answer_index":0,'
   + '"material_id":1,"slide":3,"quote":"…"}]}';
 
 export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globalThis.fetch } = {}) {
@@ -244,24 +244,26 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     },
   };
 
-  // topics: [{ id, name, existing: [prompt] }]; materials: [{ id, filename, data }]
-  async function generateQuestions({ examTitle, topics, materials }) {
+  // count: how many questions; topics: the exam's topics so far, [{ name, existing: [prompt] }]; materials: [{ id, filename, data }]
+  async function generateQuestions({ examTitle, count = COUNT.default, topics = [], materials }) {
     if (!apiKey) throw new HttpError(503, 'AI questions are not set up on this server (AI_API_KEY is missing)');
     const { blocks, slideCount, skipped } = materialBlocks(materials);
     if (!blocks.length) throw new HttpError(400, 'None of the uploaded files can be read. Upload slides as PDF or PPTX.');
     const topicList = topics.map((t) => [
-      `- topic_id ${t.id}: ${t.name}`,
+      `- ${t.name}`,
       ...t.existing.map((p) => `    already has: ${p.slice(0, 200).replace(/\s+/g, ' ')}`),
     ].join('\n')).join('\n');
+    const task = `Exam: ${examTitle}\n\nWrite ${count} questions.\n\n`
+      + (topicList ? `The student's topics so far:\n${topicList}` : 'The student has no topics yet: name them from the materials.');
 
-    const text = await ask[provider](blocks, `Exam: ${examTitle}\n\nTopics:\n${topicList}`);
+    const text = await ask[provider](blocks, task);
     let parsed;
     try {
       parsed = JSON.parse(text);
     } catch {
       throw new HttpError(502, `${label} sent back something that is not a question list. Try again.`);
     }
-    return { questions: cleanQuestions(parsed?.questions, topics, slideCount), skipped };
+    return { questions: cleanQuestions(parsed?.questions, count, slideCount), skipped };
   }
 
   return { enabled: Boolean(apiKey), provider, model, label, generateQuestions };

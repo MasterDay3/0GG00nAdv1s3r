@@ -370,3 +370,7 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .auth .tabs button:not(.secondary) { background: var(--color-paper-2); color: var(--color-ink); border-color: var(--color-rule); box-shadow: 0 1px 2px var(--color-rule); }
 .q .source { margin: var(--space-xs) 0 0; }
 .q .source .tag { margin-right: var(--space-3xs); }
+
+.generate-form { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
+.generate-form label.inline { display: inline-flex; align-items: center; gap: var(--space-xs); margin: 0; }
+.count-input { width: 5.5rem; }

@@ -7,7 +7,7 @@ import { dueReminders, reminderText } from './reminders.js';
 import { buildPlan, localDate } from './plan.js';
 import { scoreDiagnostic } from './diagnostic.js';
 import { HttpError, text, link, timestamp } from './validate.js';
-import { createAi } from './ai.js';
+import { createAi, COUNT } from './ai.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
 } from './bot.js';
@@ -616,9 +616,11 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   route('POST', '/api/exams/:id/generate', async ({ user, params, body }) => {
     const exam = ownExam(user, params.id);
-    let topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
-    if (Array.isArray(body.topicIds)) topics = topics.filter((t) => body.topicIds.includes(t.id));
-    if (!topics.length) throw new HttpError(400, 'Add the exam topics first');
+    const count = body.count === undefined ? COUNT.default : body.count;
+    if (!Number.isInteger(count) || count < COUNT.min || count > COUNT.max) {
+      throw new HttpError(400, `Ask for ${COUNT.min}–${COUNT.max} questions at a time`);
+    }
+    const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
     const materials = all('SELECT id, filename, data FROM materials WHERE exam_id = ? ORDER BY id', exam.id);
     if (!materials.length) throw new HttpError(400, 'Upload your lecture slides first');
     if (generating.has(user.id)) throw new HttpError(409, 'Questions are already being generated. Wait for them to finish.');
@@ -631,6 +633,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     try {
       result = await ai.generateQuestions({
         examTitle: exam.title,
+        count,
         topics: topics.map((t) => ({ ...t, existing: existing.filter((q) => q.topicId === t.id).map((q) => q.prompt) })),
         materials,
       });
@@ -640,12 +643,21 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     run('INSERT INTO ai_runs (user_id, created_at) VALUES (?, ?)', user.id, now());
 
     const filenames = new Map(materials.map((m) => [m.id, m.filename]));
+    // The model names the topics; a name the exam does not have yet becomes a new topic.
+    const topicIds = new Map(topics.map((t) => [t.name.toLowerCase(), t.id]));
+    const topicFor = (name) => {
+      const key = name.toLowerCase();
+      if (!topicIds.has(key)) {
+        topicIds.set(key, Number(run('INSERT INTO topics (exam_id, name) VALUES (?, ?)', exam.id, name).lastInsertRowid));
+      }
+      return topicIds.get(key);
+    };
     db.exec('BEGIN');
     try {
       for (const q of result.questions) {
         const { lastInsertRowid } = run(
           'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
-          q.topicId, q.prompt, JSON.stringify(q.options), q.answerIndex,
+          topicFor(q.topic), q.prompt, JSON.stringify(q.options), q.answerIndex,
         );
         run(
           'INSERT INTO question_sources (question_id, material_id, filename, slide, quote) VALUES (?, ?, ?, ?, ?)',

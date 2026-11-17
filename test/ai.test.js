@@ -94,36 +94,36 @@ test('ai: material blocks label every file and skip what cannot be read', () => 
   assert.deepEqual(skipped.map((s) => s.filename), ['photo.png', 'broken.pptx']);
 });
 
-test('ai: clean questions drops malformed ones and caps each topic at 5', () => {
+test('ai: clean questions drops malformed ones and stops at the asked count', () => {
   const slideCount = new Map([[1, 10], [3, 0]]);
   const good = (extra = {}) => ({
-    topic_id: 7, prompt: ' A loop inside a loop over 1000 items runs how many times? ', options: ['1000', '1 000 000', '2000'],
+    topic: ' Big  O ', prompt: ' A loop inside a loop over 1000 items runs how many times? ', options: ['1000', '1 000 000', '2000'],
     answer_index: 1, material_id: 1, slide: 2, quote: 'Nested loops take O(n²)', ...extra,
   });
   const raw = [
     good(),
-    good({ topic_id: 99 }), // unknown topic
+    good({ topic: '  ' }), // no topic name
     good({ material_id: 2 }), // file that was not sent
     good({ slide: 11 }), // past the last slide
-    good({ material_id: 3, slide: 1 }), // text file has no slides
     good({ answer_index: 3 }),
     good({ options: ['same', 'same'] }),
     good({ options: ['only one'] }),
     good({ prompt: '' }),
-    ...Array.from({ length: 6 }, (_, i) => good({ prompt: `Variant ${i}` })),
+    ...Array.from({ length: 6 }, (_, i) => good({ prompt: `Variant ${i}`, topic: i % 2 ? 'Recursion' : 'Big O' })),
   ];
-  const cleaned = cleanQuestions(raw, [{ id: 7, name: 'Big O' }], slideCount);
-  assert.equal(cleaned.length, 5);
+  const cleaned = cleanQuestions(raw, 4, slideCount);
+  assert.equal(cleaned.length, 4, 'stops at the asked count');
   assert.deepEqual(cleaned[0], {
-    topicId: 7, prompt: 'A loop inside a loop over 1000 items runs how many times?', options: ['1000', '1 000 000', '2000'],
+    topic: 'Big O', prompt: 'A loop inside a loop over 1000 items runs how many times?', options: ['1000', '1 000 000', '2000'],
     answerIndex: 1, materialId: 1, slide: 2, quote: 'Nested loops take O(n²)',
   });
+  assert.deepEqual(cleaned.map((q) => q.topic), ['Big O', 'Big O', 'Recursion', 'Big O']);
+  assert.deepEqual(cleanQuestions(raw, 30, slideCount).length, 7);
   assert.deepEqual(
-    cleanQuestions([{ topic_id: 1, prompt: 'Q', options: ['a', 'b'], answer_index: 0, material_id: 9, slide: 2, quote: '' }], [{ id: 1 }], new Map([[9, 0]]))
-      .map((q) => q.slide),
+    cleanQuestions([good({ material_id: 3, slide: 2 })], 5, slideCount).map((q) => q.slide),
     [0], 'notes without slides keep the question, with slide 0',
   );
-  assert.deepEqual(cleanQuestions('nonsense', [], slideCount), []);
+  assert.deepEqual(cleanQuestions('nonsense', 5, slideCount), []);
 });
 
 function fakeClaude(reply, status = 200) {
@@ -173,8 +173,8 @@ test('ai: generate stores questions with their slide and shows the source', asyn
     content: [
       { type: 'thinking', thinking: '' },
       { type: 'text', text: JSON.stringify({ questions: [
-        { topic_id: topicId, prompt: 'Two nested loops over 50 items: how many steps?', options: ['100', '2500', '50'], answer_index: 1, material_id: materialId, slide: 2, quote: 'Nested loops' },
-        { topic_id: topicId, prompt: 'Bad slide', options: ['a', 'b'], answer_index: 0, material_id: materialId, slide: 42, quote: '' },
+        { topic: 'Big O', prompt: 'Two nested loops over 50 items: how many steps?', options: ['100', '2500', '50'], answer_index: 1, material_id: materialId, slide: 2, quote: 'Nested loops' },
+        { topic: 'Big O', prompt: 'Bad slide', options: ['a', 'b'], answer_index: 0, material_id: materialId, slide: 42, quote: '' },
       ] }) },
     ],
   }));
@@ -199,7 +199,7 @@ test('ai: generate stores questions with their slide and shows the source', asyn
   assert.equal(request.body.model, MODEL);
   assert.equal(request.body.output_config.format.type, 'json_schema');
   assert.match(request.body.system, /practical/);
-  assert.match(request.body.messages[0].content.at(-1).text, new RegExp(`topic_id ${topic.id}: Big O`));
+  assert.match(request.body.messages[0].content.at(-1).text, /Write 10 questions\.[\s\S]*- Big O/);
 
   // A second run tells Claude which questions already exist, and the test uses the generated question.
   await call('POST', `/api/exams/${exam.id}/generate`, {});
@@ -213,7 +213,7 @@ test('ai: generate stores questions with their slide and shows the source', asyn
   assert.deepEqual(after.source, { materialId: null, filename: 'l1.pptx', slide: 2, quote: 'Nested loops' });
 });
 
-test('ai: generate needs a key, topics and slides; errors and refusals are reported', async (t) => {
+test('ai: generate needs a key and slides, checks the count; errors and refusals are reported', async (t) => {
   const off = await start(createAi({}));
   t.after(off.close);
   const { exam: offExam } = await examWithSlides(off.call);
@@ -225,12 +225,14 @@ test('ai: generate needs a key, topics and slides; errors and refusals are repor
   t.after(on.close);
   await on.call('POST', '/api/register', { username: 'taras', password: 'correct horse' });
   const exam = (await on.call('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * 86_400_000 })).data;
-  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /topics first/);
-  await on.call('POST', `/api/exams/${exam.id}/topics`, { name: 'Limits' });
   assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /slides first/);
   await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'photo.png', data: Buffer.from('png').toString('base64') });
   assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /PDF or PPTX/);
   await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l1.pptx', data: PPTX.toString('base64') });
+  for (const count of [0, 31, 2.5, '5']) {
+    assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, { count })).data.error, /1–30 questions/);
+  }
+  assert.equal(refusing.requests.length, 0);
   const refused = await on.call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(refused.status, 422);
   assert.equal(refusing.requests.length, 1);
@@ -240,6 +242,38 @@ test('ai: generate needs a key, topics and slides; errors and refusals are repor
   t.after(busy.close);
   const { exam: busyExam } = await examWithSlides(busy.call);
   assert.equal((await busy.call('POST', `/api/exams/${busyExam.id}/generate`, {})).status, 503);
+});
+
+test('ai: asks for the chosen number of questions and files them under the topics the model names', async (t) => {
+  let materialId;
+  const q = (topic, prompt) => ({ topic, prompt, options: ['a', 'b', 'c'], answer_index: 0, material_id: materialId, slide: 1, quote: '' });
+  const claude = fakeClaude(() => ({
+    stop_reason: 'end_turn',
+    content: [{ type: 'text', text: JSON.stringify({ questions: [
+      q('big o', 'Q1'), q('Recursion', 'Q2'), q('Recursion', 'Q3'), q('Big O', 'Q4'), q('Sorting', 'Q5 over the count'),
+    ] }) }],
+  }));
+  const { call, close } = await start(createAi({ apiKey: 'k', fetchImpl: claude.fetchImpl }));
+  t.after(close);
+  const { exam, material } = await examWithSlides(call); // has the topic "Big O"
+  materialId = material.id;
+
+  const r = await call('POST', `/api/exams/${exam.id}/generate`, { count: 4 });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.added, 4);
+  assert.match(claude.requests[0].body.messages[0].content.at(-1).text, /Write 4 questions\./);
+  assert.deepEqual(
+    r.data.topics.map((tp) => [tp.name, tp.questions.map((x) => x.prompt)]),
+    [['Big O', ['Q1', 'Q4']], ['Recursion', ['Q2', 'Q3']]],
+    'reuses an existing topic whatever its case, creates the new one, stops at 4',
+  );
+
+  // Without any topics the model names them all.
+  await call('DELETE', `/api/topics/${r.data.topics[0].id}`);
+  await call('DELETE', `/api/topics/${r.data.topics[1].id}`);
+  const fresh = await call('POST', `/api/exams/${exam.id}/generate`, { count: 2 });
+  assert.match(claude.requests[1].body.messages[0].content.at(-1).text, /no topics yet/);
+  assert.deepEqual(fresh.data.topics.map((tp) => tp.name), ['big o', 'Recursion']);
 });
 
 test('ai: generation is limited per day', async (t) => {
@@ -266,7 +300,7 @@ test('ai: provider comes from AI_PROVIDER or the shape of the key', () => {
 });
 
 const ONE_QUESTION = (topicId, materialId) => JSON.stringify({ questions: [
-  { topic_id: topicId, prompt: 'Loop over 10 items twice: steps?', options: ['20', '100'], answer_index: 0, material_id: materialId, slide: 1, quote: 'loops' },
+  { topic: 'Loops', prompt: 'Loop over 10 items twice: steps?', options: ['20', '100'], answer_index: 0, material_id: materialId, slide: 1, quote: 'loops' },
 ] });
 
 test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
@@ -299,7 +333,7 @@ test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
   const pdf = req.body.input.find((i) => i.type === 'document');
   assert.equal(pdf.mime_type, 'application/pdf');
   assert.equal(Buffer.from(pdf.data, 'base64').toString(), '%PDF-1.4');
-  assert.match(req.body.input.at(-1).text, /topic_id \d+: Big O/);
+  assert.match(req.body.input.at(-1).text, /Write 10 questions/);
 });
 
 test('ai: DeepSeek uploads PDFs to its Files API and uses JSON mode', async (t) => {

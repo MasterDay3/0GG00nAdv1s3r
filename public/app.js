@@ -695,29 +695,37 @@ function sourceLine(q) {
 
 function aiBlock(exam, reload) {
   const readable = exam.materials.filter((m) => /\.(pdf|pptx|docx|txt|md)$/i.test(m.filename));
-  let hint = `${exam.ai.label || 'AI'} reads your uploaded slides and writes 3–5 practice questions per topic, each marked with the slide it comes from. Only practice questions that apply the ideas to new cases, so they can't be used on graded Moodle quizzes.`;
+  let hint = `${exam.ai.label || 'AI'} reads your uploaded slides and writes as many practice questions as you ask for, sorted into topics, each marked with the slide it comes from. Only practice questions that apply the ideas to new cases, so they can't be used on graded Moodle quizzes.`;
   if (!exam.ai.enabled) hint = 'AI questions are not set up on this server yet.';
-  else if (!exam.topics.length) hint = 'Add the exam topics below first.';
   else if (!readable.length) hint = 'Upload your lecture slides below first (PDF or PPTX).';
-  const button = h('button', {
-    type: 'button', class: 'secondary',
-    disabled: !exam.ai.enabled || !exam.topics.length || !readable.length,
-    onclick: async () => {
+  const ready = exam.ai.enabled && readable.length > 0;
+  const count = h('input', {
+    type: 'number', name: 'count', min: 1, max: 30, value: '10', required: true, disabled: !ready,
+    'aria-label': 'How many questions', class: 'count-input',
+  });
+  const button = h('button', { type: 'submit', class: 'secondary', disabled: !ready }, 'Generate questions');
+  const form = h('form', {
+    class: 'generate-form',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const n = Number(count.value);
       button.disabled = true;
+      count.disabled = true;
       button.textContent = 'Generating… (up to a minute)';
-      const r = await act(() => api('POST', `/api/exams/${exam.id}/generate`, {}));
+      const r = await act(() => api('POST', `/api/exams/${exam.id}/generate`, { count: n }));
       if (r) {
         const skipped = r.skipped.map((s) => ` Skipped ${s.filename}: ${s.reason}.`).join('');
-        toast((r.added ? `Added ${plural(r.added, 'question')} from your slides.` : 'No new questions: the slides do not cover these topics.') + skipped, !r.added);
+        toast((r.added ? `Added ${plural(r.added, 'question')} from your slides.` : 'No new questions: the slides did not give enough material.') + skipped, !r.added);
         reload();
       } else {
         button.disabled = false;
+        count.disabled = false;
         button.textContent = 'Generate questions';
       }
     },
-  }, 'Generate questions');
+  }, h('label', { class: 'inline' }, count, 'questions'), button);
   return h('section', { class: 'panel' },
-    h('div', { class: 'head' }, h('h2', {}, 'Questions from your slides'), button),
+    h('div', { class: 'head' }, h('h2', {}, 'Questions from your slides'), form),
     h('p', { class: 'muted small' }, hint));
 }
 
