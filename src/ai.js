@@ -6,8 +6,9 @@ import { kindOf, pptxSlides, docxText } from './slides.js';
 export const MODEL = 'claude-opus-5-5';
 export const PROVIDERS = {
   claude: { model: MODEL, label: 'Claude' },
-  // Busy Gemini models answer 503 "high demand"; then the next one in `fallbacks` is tried.
-  gemini: { model: 'gemini-3.8-flash', label: 'Gemini', fallbacks: ['gemini-3-flash-preview', 'gemini-2.5-flash'] },
+  // A busy Gemini model answers 503 "high demand" or does not answer at all; then the next one is tried.
+  // gemini-3.8-flash was often overloaded in Nov 2026, so the default is the one that answered reliably.
+  gemini: { model: 'gemini-3-flash-preview', label: 'Gemini', fallbacks: ['gemini-3.8-flash'], attemptTimeout: 90_000 },
   deepseek: { model: 'deepseek-flash', label: 'DeepSeek' },
 };
 // How many questions one run writes: the student picks the number.
@@ -143,11 +144,23 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
   model ||= PROVIDERS[provider].model;
   const label = PROVIDERS[provider].label;
 
-  async function post(url, headers, body, { busyOk = false } = {}) {
-    const res = await fetchImpl(url, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT),
-    });
+  // busyOk: return null instead of failing when the model is busy or too slow, so the caller can try another.
+  async function post(url, headers, body, { busyOk = false, timeout = TIMEOUT } = {}) {
+    let res;
+    try {
+      res = await fetchImpl(url, {
+        method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (err) {
+      if (err.name !== 'TimeoutError' && err.name !== 'AbortError') {
+        console.error(`${label} API unreachable:`, err.message);
+        throw new HttpError(502, `Could not reach ${label}. Try again later.`);
+      }
+      console.error(`${label} ${body.model} did not answer in ${timeout / 1000} s`);
+      if (busyOk) return null;
+      throw new HttpError(504, `${label} took too long to answer. Try again, or ask for fewer questions.`);
+    }
     const data = await res.json().catch(() => null);
     if (busyOk && [429, 503].includes(res.status)) return null;
     if (!res.ok) {
@@ -199,7 +212,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
           response_format: { type: 'text', mime_type: 'application/json', schema: SCHEMA },
           generation_config: { max_output_tokens: 16000 },
           store: false,
-        }, { busyOk: i < models.length - 1 });
+        }, { busyOk: i < models.length - 1, timeout: PROVIDERS.gemini.attemptTimeout });
         if (data) break;
         console.error(`Gemini ${m} is busy, trying ${models[i + 1]}`);
       }

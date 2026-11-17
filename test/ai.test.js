@@ -320,11 +320,11 @@ test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
   ids = { topic: topic.id, material: material.id };
   await call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l2.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
 
-  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: 'gemini-3.8-flash', label: 'Gemini' });
+  assert.deepEqual((await call('GET', `/api/exams/${exam.id}`)).data.ai, { enabled: true, model: 'gemini-3-flash-preview', label: 'Gemini' });
   const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(r.status, 200);
   assert.equal(r.data.added, 1);
-  assert.deepEqual(requests.map((q) => q.body.model), ['gemini-3.8-flash', 'gemini-3-flash-preview'], 'a busy model falls back');
+  assert.deepEqual(requests.map((q) => q.body.model), ['gemini-3-flash-preview', 'gemini-3.8-flash'], 'a busy model falls back');
   const [req] = requests;
   assert.equal(req.url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
   assert.equal(req.headers['x-goog-api-key'], 'AIza-test');
@@ -372,4 +372,30 @@ test('ai: DeepSeek uploads PDFs to its Files API and uses JSON mode', async (t) 
   const res = await cut.call('POST', `/api/exams/${e.exam.id}/generate`, {});
   assert.equal(res.status, 502);
   assert.match(res.data.error, /cut off/);
+});
+
+test('ai: a model that never answers falls back, and a final timeout is a clear error', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const timeout = () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }); };
+  let ids;
+  const models = [];
+  const hangsOnce = async (url, init) => {
+    const body = JSON.parse(init.body);
+    models.push(body.model);
+    if (models.length === 1) timeout();
+    return Response.json({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: ONE_QUESTION(ids.topic, ids.material) }] }] });
+  };
+  const ok = await start(createAi({ provider: 'gemini', apiKey: 'k', fetchImpl: hangsOnce }));
+  t.after(ok.close);
+  const a = await examWithSlides(ok.call);
+  ids = { topic: a.topic.id, material: a.material.id };
+  assert.equal((await ok.call('POST', `/api/exams/${a.exam.id}/generate`, { count: 1 })).data.added, 1);
+  assert.deepEqual(models, ['gemini-3-flash-preview', 'gemini-3.8-flash']);
+
+  const never = await start(createAi({ provider: 'deepseek', apiKey: 'k', fetchImpl: async () => timeout() }));
+  t.after(never.close);
+  const b = await examWithSlides(never.call);
+  const r = await never.call('POST', `/api/exams/${b.exam.id}/generate`, { count: 1 });
+  assert.equal(r.status, 504);
+  assert.match(r.data.error, /took too long/);
 });
