@@ -22,6 +22,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `api`: Storage limit for uploaded files: 100 MB per account across all exams (`STORAGE_MB_PER_USER`); the materials block shows how much is used.
 - `ui`: Progress: every diagnostic attempt is kept; the exam page charts the score per attempt and each topic's first vs. last result.
 - `ui`: Practise your mistakes: a round with only the questions the last test got wrong (from the exam page or the results screen); it does not change the diagnostic.
 - `api`: Calendar feed: a secret link (shown once, can be replaced or turned off) that Google, Apple or Outlook calendars subscribe to; open deadlines and exams, refreshed hourly.

@@ -719,3 +719,26 @@ test('prep: every attempt is kept for the progress chart, the last one lists its
   await mykola('DELETE', `/api/questions/${ids[2]}`);
   assert.deepEqual((await mykola('GET', `/api/exams/${examId}`)).data.mistakes, []);
 });
+
+test('materials: one account has a storage limit across all its exams', async (t) => {
+  const { base, close } = await start({ storageLimit: 100 });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  const other = await signedUp(base, 'maryan');
+  const upload = async (who, examId, bytes) => (await who('POST', `/api/exams/${examId}/materials`, {
+    filename: 'notes.txt', data: Buffer.alloc(bytes, 'a').toString('base64'),
+  })).status;
+  const a = (await call('POST', '/api/exams', { title: 'A', examAt: NOW + DAY })).data.id;
+  const b = (await call('POST', '/api/exams', { title: 'B', examAt: NOW + DAY })).data.id;
+  const theirs = (await other('POST', '/api/exams', { title: 'C', examAt: NOW + DAY })).data.id;
+
+  assert.equal(await upload(call, a, 60), 200);
+  assert.equal(await upload(call, b, 41), 413, 'the limit counts every exam of the account');
+  assert.equal(await upload(call, b, 40), 200);
+  assert.deepEqual((await call('GET', `/api/exams/${a}`)).data.storage, { used: 100, limit: 100 });
+  assert.equal(await upload(other, theirs, 100), 200, 'another account has its own space');
+
+  const fileId = (await call('GET', `/api/exams/${a}`)).data.materials[0].id;
+  await call('DELETE', `/api/materials/${fileId}`);
+  assert.equal(await upload(call, b, 60), 200, 'deleting a file frees its space');
+});

@@ -405,3 +405,4 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .progress-date { white-space: nowrap; }
 .progress-topics td.up { color: var(--color-green); }
 .progress-topics td.down { color: var(--color-error); }
+.storage { margin-top: var(--space-sm); } .storage .bar { max-width: 320px; margin-top: var(--space-2xs); }

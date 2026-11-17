@@ -1037,6 +1037,9 @@ function materialsBlock(exam, reload) {
             },
           }, 'Видалити')))))
       : h('p', { class: 'muted' }, 'Тримайте слайди й задачники поруч з екзаменом (до 10 МБ на файл).'),
+      exam.storage ? h('div', { class: 'storage' },
+        h('p', { class: 'muted small' }, `Зайнято ${fmtSize(exam.storage.used)} з ${fmtSize(exam.storage.limit)} на всі ваші екзамени.`),
+        bar(exam.storage.used / exam.storage.limit, exam.storage.used / exam.storage.limit > 0.9 ? 'weak' : '')) : null,
     h('div', { class: 'row' }, input, h('button', {
       type: 'button', class: 'secondary shrink',
       onclick: async (e) => {
@@ -1044,6 +1047,7 @@ function materialsBlock(exam, reload) {
         e.target.disabled = true;
         for (const file of input.files) {
           if (file.size > 10 * 1024 * 1024) { toast(`${file.name} більший за 10 МБ`, true); continue; }
+          if (exam.storage && exam.storage.used + file.size > exam.storage.limit) { toast(`Для ${file.name} не вистачає місця: видаліть старі файли`, true); continue; }
           await act(async () => api('POST', `/api/exams/${exam.id}/materials`, { filename: file.name, data: await readAsBase64(file) }));
         }
         e.target.disabled = false;

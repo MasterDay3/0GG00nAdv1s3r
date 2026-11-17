@@ -23,6 +23,7 @@ Environment variables:
 | `AI_API_KEY` | — | Turns on AI practice questions generated from uploaded slides. A Claude, Gemini or DeepSeek key (`ANTHROPIC_API_KEY` also works) |
 | `AI_PROVIDER` | from the key | `claude`, `gemini` or `deepseek`. Without it: `sk-ant-…` is Claude, `AIza…` is Gemini, any other key is DeepSeek |
 | `AI_MODEL` | per provider | Model id; defaults `claude-opus-5-5`, `gemini-3.8-flash`, `deepseek-flash` |
+| `STORAGE_MB_PER_USER` | `100` | Uploaded files one account may keep, across all its exams |
 
 ## Deploy (AWS Lightsail)
 

@@ -106,7 +106,11 @@ function normalizeFeedUrl(value) {
   return link(url, 'Посилання на календар');
 }
 
-export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false, ai = createAi() }) {
+// storageLimit: bytes of uploaded files one user may keep, across all their exams.
+export function createApp({
+  db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false, ai = createAi(),
+  storageLimit = 100 * 1024 * 1024,
+}) {
   // Behind HTTPS the session cookie must never travel over plain HTTP.
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
   const routes = [];
@@ -286,6 +290,10 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   }
 
   // ---------- prep ----------
+
+  const storageUsed = (user) => one(
+    'SELECT COALESCE(SUM(m.size), 0) AS used FROM materials m JOIN exams e ON e.id = m.exam_id WHERE e.user_id = ?', user.id,
+  ).used;
 
   function ownExam(user, id) {
     const exam = one('SELECT * FROM exams WHERE id = ? AND user_id = ?', id, user.id);
@@ -672,7 +680,10 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     return { id: Number(lastInsertRowid) };
   });
 
-  route('GET', '/api/exams/:id', ({ user, params }) => withAi(examDetail(ownExam(user, params.id))));
+  route('GET', '/api/exams/:id', ({ user, params }) => ({
+    ...withAi(examDetail(ownExam(user, params.id))),
+    storage: { used: storageUsed(user), limit: storageLimit },
+  }));
 
   route('PUT', '/api/exams/:id', ({ user, params, body }) => {
     const exam = ownExam(user, params.id);
@@ -797,6 +808,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const data = Buffer.from(body.data, 'base64');
     if (!data.length) throw new HttpError(400, 'Файл порожній');
     if (data.length > MAX_FILE) throw new HttpError(413, 'Файл не може бути більшим за 10 МБ');
+    if (storageUsed(user) + data.length > storageLimit) {
+      throw new HttpError(413, `Місце для файлів закінчилося (${Math.round(storageLimit / 1024 / 1024)} МБ на акаунт). Видаліть старі файли, які вже не потрібні.`);
+    }
     const { lastInsertRowid } = run(
       'INSERT INTO materials (exam_id, filename, size, data, created_at) VALUES (?, ?, ?, ?, ?)',
       params.id, filename, data.length, data, now(),
