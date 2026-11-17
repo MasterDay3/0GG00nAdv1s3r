@@ -318,8 +318,22 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       questions: questions.filter((q) => q.topicId === t.id),
       problems: problems.filter((p) => p.topic_id === t.id).map((p) => ({ id: p.id, text: p.text })),
     }));
-    const attempt = one('SELECT * FROM attempts WHERE exam_id = ? ORDER BY id DESC LIMIT 1', exam.id);
-    const result = attempt ? { takenAt: attempt.created_at, topics: JSON.parse(attempt.result) } : null;
+    // Every attempt, oldest first, so the page can show the trend; the last one drives the plan.
+    const attempts = all('SELECT * FROM attempts WHERE exam_id = ? ORDER BY id', exam.id).map((a) => {
+      const byTopic = JSON.parse(a.result);
+      return {
+        takenAt: a.created_at,
+        correct: byTopic.reduce((n, t) => n + t.correct, 0),
+        total: byTopic.reduce((n, t) => n + t.total, 0),
+        topics: byTopic,
+        wrong: JSON.parse(a.wrong || '[]'),
+      };
+    });
+    const last = attempts.at(-1);
+    const result = last ? { takenAt: last.takenAt, topics: last.topics } : null;
+    // Mistakes of the last attempt that are still in the exam (a question may have been deleted since).
+    const questionIds = new Set(questions.map((q) => q.id));
+    const mistakes = last ? last.wrong.filter((id) => questionIds.has(id)) : [];
     const statusOf = (topicId) => result?.topics.find((r) => r.topicId === topicId)?.status || 'untested';
     return {
       id: exam.id,
@@ -330,6 +344,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       materials: all('SELECT id, filename, size, created_at FROM materials WHERE exam_id = ? ORDER BY id', exam.id)
         .map((m) => ({ id: m.id, filename: m.filename, size: m.size, createdAt: m.created_at })),
       result,
+      history: attempts.map(({ takenAt, correct, total, topics: byTopic }) => ({ takenAt, correct, total, topics: byTopic })),
+      mistakes,
       plan: buildPlan({
         today: localDate(now()),
         examDate: localDate(exam.exam_at),
@@ -831,7 +847,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     if (!questions.length) throw new HttpError(400, 'Спершу додайте питання');
     const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
     const result = scoreDiagnostic(topics, questions, answers);
-    run('INSERT INTO attempts (exam_id, created_at, result) VALUES (?, ?, ?)', exam.id, now(), JSON.stringify(result));
+    const wrong = questions.filter((q) => answers[q.id] !== q.answerIndex).map((q) => q.id);
+    run('INSERT INTO attempts (exam_id, created_at, result, wrong) VALUES (?, ?, ?, ?)',
+      exam.id, now(), JSON.stringify(result), JSON.stringify(wrong));
     return examDetail(exam);
   });
 

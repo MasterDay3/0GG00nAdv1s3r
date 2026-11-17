@@ -112,6 +112,9 @@ export function openDb(path = ':memory:') {
   }
   // Secret link to the board as a calendar feed (stored hashed, like the extension key).
   if (!userColumns.includes('cal_token_hash')) db.exec('ALTER TABLE users ADD COLUMN cal_token_hash TEXT');
+  // Which questions a diagnostic attempt got wrong (JSON array of ids), for "practise your mistakes".
+  const attemptColumns = db.prepare('PRAGMA table_info(attempts)').all().map((c) => c.name);
+  if (!attemptColumns.includes('wrong')) db.exec("ALTER TABLE attempts ADD COLUMN wrong TEXT NOT NULL DEFAULT '[]'");
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).

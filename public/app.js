@@ -1075,6 +1075,48 @@ function resultBlock(exam) {
       : h('p', { class: 'spaced' }, 'Слабких тем немає. Просто повторюйте.'));
 }
 
+// Progress over attempts: overall score per attempt, and each topic first vs. last.
+function historyBlock(exam) {
+  if (exam.history.length < 2) return null;
+  const pct = (a) => (a.total ? Math.round((a.correct / a.total) * 100) : 0);
+  const recent = exam.history.slice(-10);
+  const first = exam.history[0];
+  const last = exam.history.at(-1);
+  const topicPct = (attempt, name) => {
+    const t = attempt.topics.find((x) => x.name === name && x.total);
+    return t ? Math.round((t.correct / t.total) * 100) : null;
+  };
+  const delta = (from, to) => {
+    if (from === null || to === null) return '—';
+    const d = to - from;
+    return d > 0 ? `+${d}` : String(d);
+  };
+  return h('section', { class: 'panel' },
+    h('h2', {}, 'Прогрес'),
+    h('p', { class: 'muted small' }, `${plural(exam.history.length, ['спроба', 'спроби', 'спроб'])}: було ${pct(first)} %, зараз ${pct(last)} %.`),
+    h('ol', { class: 'progress-chart', 'aria-label': 'Результати останніх спроб' },
+      recent.map((a) => {
+        const column = h('span', { class: `progress-bar ${pct(a) >= 70 ? 'good' : 'weak'}` });
+        column.style.height = `${Math.max(4, pct(a))}%`;
+        return h('li', { title: `${fmtDate(a.takenAt)}: ${a.correct}/${a.total}` },
+          h('span', { class: 'progress-value num' }, `${pct(a)}%`),
+          h('span', { class: 'progress-track' }, column),
+          h('span', { class: 'progress-date small muted' }, new Date(a.takenAt).toLocaleDateString('uk-UA', { day: 'numeric', month: 'numeric' })));
+      })),
+    h('table', { class: 'plan progress-topics' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Тема'), h('th', {}, 'Перша'), h('th', {}, 'Остання'), h('th', {}, 'Зміна'))),
+      h('tbody', {}, last.topics.filter((t) => t.total).map((t) => {
+        const a = topicPct(first, t.name);
+        const b = topicPct(last, t.name);
+        const d = delta(a, b);
+        return h('tr', {},
+          h('td', {}, t.name),
+          h('td', { class: 'num' }, a === null ? '—' : `${a}%`),
+          h('td', { class: 'num' }, `${b}%`),
+          h('td', { class: `num ${d.startsWith('+') ? 'up' : d.startsWith('-') ? 'down' : ''}` }, d));
+      }))));
+}
+
 function planBlock(exam) {
   const today = todayStr();
   const label = { practice: 'Тренування (слабкі)', refresh: 'Повторення', review: 'Загальне повторення' };
@@ -1137,11 +1179,14 @@ async function showExam(id) {
     h('section', { class: 'panel' },
       h('div', { class: 'head' },
         h('h2', {}, 'Діагностичний тест'),
-        h('button', { type: 'button', disabled: !questionCount, onclick: () => showTest(exam) }, exam.result ? 'Пройти ще раз' : 'Пройти тест')),
+        h('div', { class: 'tools' },
+          exam.mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam, exam.mistakes) }, `Повторити помилки (${exam.mistakes.length})`) : null,
+          h('button', { type: 'button', disabled: !questionCount, onclick: () => showTest(exam) }, exam.result ? 'Пройти ще раз' : 'Пройти тест'))),
       h('p', { class: 'muted small' }, questionCount
         ? `${plural(questionCount, QUESTIONS)} у ${plural(exam.topics.length, ['темі', 'темах', 'темах'])}. Від 70 % правильних тема вважається сильною.`
         : 'Додайте нижче теми й кілька питань, а потім пройдіть тест.')),
     resultBlock(exam),
+    historyBlock(exam),
     planBlock(exam),
     aiBlock(exam, reload),
     h('section', { class: 'panel' },
@@ -1194,9 +1239,11 @@ function sourceHint(source) {
 }
 
 // The diagnostic test, one question at a time with instant feedback. Scored on the server at the end.
-async function showTest(exam) {
+// only: question ids for a practice round on mistakes; it is not saved and does not change the diagnostic.
+async function showTest(exam, only = null) {
   const { questions } = await api('GET', `/api/exams/${exam.id}/test`);
-  const order = shuffled(questions);
+  const practice = Array.isArray(only);
+  const order = shuffled(practice ? questions.filter((q) => only.includes(q.id)) : questions);
   const answers = {};
   let index = 0;
   const root = h('div', { class: 'quiz' });
@@ -1265,16 +1312,18 @@ async function showTest(exam) {
   }
 
   async function finish() {
-    const detail = await act(() => api('POST', `/api/exams/${exam.id}/test`, { answers }));
+    const detail = practice ? null : await act(() => api('POST', `/api/exams/${exam.id}/test`, { answers }));
     const right = correctCount();
     const pct = order.length ? Math.round((right / order.length) * 100) : 0;
     const mistakes = order.filter((q) => answers[q.id] !== q.answerIndex);
     const topics = detail?.result?.topics || [];
-    root.replaceChildren(
+    // h() skips null children, replaceChildren() would print "null": go through a wrapper.
+    root.replaceChildren(...h('div', {},
       h('div', { class: 'quiz-card quiz-summary' },
         h('p', { class: 'muted' }, 'Ваш результат'),
         h('p', { class: 'score-big num' }, `${right} / ${order.length}`),
-        h('p', { class: 'muted' }, `${pct} % правильних${detail ? '' : ' (не збережено, спробуйте ще раз)'}`),
+        h('p', { class: 'muted' }, `${pct} % правильних${detail || practice ? '' : ' (не збережено, спробуйте ще раз)'}`),
+        practice ? h('p', { class: 'muted small' }, 'Тренування на помилках не змінює результат діагностики.') : null,
         bar(right / (order.length || 1), pct >= 70 ? 'good' : 'weak')),
       topics.length ? h('section', { class: 'quiz-topics' },
         h('h2', {}, 'За темами'),
@@ -1292,16 +1341,19 @@ async function showTest(exam) {
           answers[q.id] === undefined ? h('p', { class: 'muted small' }, 'Без відповіді.') : null,
           sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'Жодної помилки. Чудово! 🎉'),
       h('div', { class: 'quiz-actions' },
-        h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam) }, 'Пройти ще раз'),
-        h('button', { type: 'button', onclick: backToExam }, 'До плану підготовки')));
+        mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam, mistakes.map((q) => q.id)) }, `Повторити помилки (${mistakes.length})`) : null,
+        practice ? null : h('button', { type: 'button', class: 'secondary', onclick: () => showTest(exam) }, 'Пройти ще раз'),
+        h('button', { type: 'button', onclick: backToExam }, 'До плану підготовки'))).childNodes);
     window.scrollTo(0, 0);
   }
 
   setView(
     h('a', { class: 'back', href: `#/prep/${exam.id}` }, exam.title),
     h('div', { class: 'page-head' },
-      h('h1', {}, 'Діагностичний тест'),
-      h('p', { class: 'muted' }, 'Відповідайте чесно: мета — знайти, чого ви ще не знаєте.')),
+      h('h1', {}, practice ? 'Робота над помилками' : 'Діагностичний тест'),
+      h('p', { class: 'muted' }, practice
+        ? 'Лише питання, на які ви відповіли неправильно. Результат не зберігається.'
+        : 'Відповідайте чесно: мета — знайти, чого ви ще не знаєте.')),
     root);
   if (order.length) draw();
   else root.replaceChildren(h('p', { class: 'muted' }, 'У цього екзамену ще немає питань.'));

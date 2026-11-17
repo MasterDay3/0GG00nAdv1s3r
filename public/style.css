@@ -393,3 +393,15 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .filter-bar select { min-width: 180px; }
 .board-list { margin-top: var(--space-md); }
 .calendar-how { margin: var(--space-sm) 0 0; padding-left: 1.2em; } .calendar-how li + li { margin-top: var(--space-2xs); }
+
+/* Progress over diagnostic attempts */
+.progress-chart { list-style: none; margin: var(--space-md) 0; padding: 0; display: flex; align-items: flex-end; gap: var(--space-xs); height: 160px; }
+.progress-chart li { flex: 1 1 0; min-width: 0; max-width: 64px; height: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--space-2xs); }
+.progress-track { flex: 1; width: 100%; display: flex; align-items: flex-end; background: var(--color-paper-3); border-radius: 4px; overflow: hidden; }
+.progress-bar { display: block; width: 100%; background: var(--color-accent); border-radius: 4px 4px 0 0; }
+.progress-bar.good { background: var(--color-green); }
+.progress-bar.weak { background: var(--color-error); }
+.progress-value { font-size: var(--text-sm); }
+.progress-date { white-space: nowrap; }
+.progress-topics td.up { color: var(--color-green); }
+.progress-topics td.down { color: var(--color-error); }

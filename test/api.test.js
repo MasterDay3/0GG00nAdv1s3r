@@ -695,3 +695,27 @@ test('calendar feed: secret link without a cookie, open items only, new link tur
   await mykola('DELETE', '/api/calendar-feed');
   assert.equal((await fetch(base + second)).status, 404);
 });
+
+test('prep: every attempt is kept for the progress chart, the last one lists its mistakes', async (t) => {
+  let clock = NOW;
+  const { base, close } = await start({ now: () => clock });
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const { id: examId } = (await mykola('POST', '/api/exams', { title: 'Calc', examAt: NOW + 5 * DAY })).data;
+  const { id: topic } = (await mykola('POST', `/api/exams/${examId}/topics`, { name: 'Limits' })).data;
+  const ids = [];
+  for (const prompt of ['a', 'b', 'c']) {
+    ids.push((await mykola('POST', `/api/topics/${topic}/questions`, { prompt, options: ['x', 'y'], answerIndex: 0 })).data.id);
+  }
+  assert.deepEqual((await mykola('GET', `/api/exams/${examId}`)).data.history, []);
+
+  await mykola('POST', `/api/exams/${examId}/test`, { answers: { [ids[0]]: 0, [ids[1]]: 1 } });
+  clock += DAY;
+  const second = (await mykola('POST', `/api/exams/${examId}/test`, { answers: { [ids[0]]: 0, [ids[1]]: 0, [ids[2]]: 1 } })).data;
+  assert.deepEqual(second.history.map((a) => [a.takenAt, a.correct, a.total]), [[NOW, 1, 3], [NOW + DAY, 2, 3]]);
+  assert.deepEqual(second.mistakes, [ids[2]]);
+
+  // A deleted question drops out of the mistakes.
+  await mykola('DELETE', `/api/questions/${ids[2]}`);
+  assert.deepEqual((await mykola('GET', `/api/exams/${examId}`)).data.mistakes, []);
+});
