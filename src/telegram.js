@@ -27,7 +27,7 @@ export function createTelegram({ token, fetchImpl = globalThis.fetch, log = cons
     // doneKey adds a "✅ Done" button that marks that deadline as done.
     async send(chatId, text, { doneKey } = {}) {
       if (!token) return log(`[telegram off] to ${chatId}: ${text}`);
-      const markup = doneKey ? { reply_markup: { inline_keyboard: [[{ text: '✅ Done', callback_data: `done:${doneKey}` }]] } } : {};
+      const markup = doneKey ? { reply_markup: { inline_keyboard: [[{ text: '✅ Виконано', callback_data: `done:${doneKey}` }]] } } : {};
       await call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true, ...markup });
     },
     async editMessage(chatId, messageId, text) {

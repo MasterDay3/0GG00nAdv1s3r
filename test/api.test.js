@@ -175,7 +175,7 @@ test('moodle: a Cloudflare bot check gives a clear message pointing to file impo
   await call('PUT', '/api/settings', { icsUrl: 'https://learn.example/calendar/export_execute.php?userid=1&authtoken=x' });
   const sync = await call('POST', '/api/sync', {});
   assert.equal(sync.status, 502);
-  assert.match(sync.data.error, /bot check/);
+  assert.match(sync.data.error, /перевіркою на бота/);
   assert.match(sync.data.error, /\.ics/);
 });
 
@@ -238,7 +238,7 @@ test('telegram: link through /start code, reminders sent once', async (t) => {
   await app.runReminders();
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /Essay/);
-  assert.match(sent[0].text, /3 days/);
+  assert.match(sent[0].text, /через 3 дні/);
 });
 
 async function linkTelegram(app, call, chatId) {
@@ -256,23 +256,23 @@ test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) =>
   await call('POST', '/api/deadlines', { title: 'Old lab', dueAt: NOW - DAY });
 
   await tg(app, 7, '/deadlines');
-  assert.match(sent.at(-1).text, /not linked/);
+  assert.match(sent.at(-1).text, /не прив’язаний/);
 
   await linkTelegram(app, call, 7);
-  assert.match(sent.at(-1).text, /Linked to Dueboard as mykola/);
+  assert.match(sent.at(-1).text, /прив’язано до Dueboard як mykola/);
 
   await tg(app, 7, '/deadlines@dueboard_test_bot');
   const list = sent.at(-1).text;
   assert.match(list, /🟡 \[Ethics\] Essay/);
-  assert.match(list, /Mon 16 Nov, 14:00/, 'shown in Kyiv time (UTC+2)');
+  assert.match(list, /пн, 16 лист\., 14:00/, 'shown in Kyiv time (UTC+2)');
   assert.match(list, /learn\.example\/a\/1/);
   assert.doesNotMatch(list, /Old lab/);
 
   await tg(app, 7, '/digest');
-  assert.match(sent.at(-1).text, /digest is off/);
+  assert.match(sent.at(-1).text, /дайджест вимкнено/);
   assert.equal((await call('GET', '/api/me')).data.telegram.digest, false);
   await tg(app, 7, '/digest');
-  assert.match(sent.at(-1).text, /digest is on/);
+  assert.match(sent.at(-1).text, /дайджест увімкнено/);
 
   await tg(app, 7, 'hello');
   assert.match(sent.at(-1).text, /\/deadlines/);
@@ -282,10 +282,10 @@ test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) =>
   assert.equal(sent.length, before, 'silent in group chats');
 
   await tg(app, 7, '/start deadbeef0000');
-  assert.match(sent.at(-1).text, /expired/);
+  assert.match(sent.at(-1).text, /застаріло/);
 
   await tg(app, 7, '/stop');
-  assert.match(sent.at(-1).text, /Unlinked/);
+  assert.match(sent.at(-1).text, /відв’язано/);
   assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
 });
 
@@ -306,7 +306,7 @@ test('telegram: group deadline is announced to the other linked members', async 
   await mykola('POST', '/api/deadlines', { title: 'My own thing', dueAt: NOW + 5 * DAY });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(sent.map((m) => m.chatId), ['2'], 'only linked members, not the author, only shared deadlines');
-  assert.match(sent[0].text, /mykola added a deadline for your group/);
+  assert.match(sent[0].text, /mykola додає дедлайн для вашої групи/);
   assert.match(sent[0].text, /Team report/);
 });
 
@@ -408,12 +408,12 @@ test('done: the Telegram button marks the deadline done and edits the reminder',
   sent.length = 0;
   await press(`done:${essay.key}`);
   assert.equal((await call('GET', '/api/deadlines')).data.items[0].done, true);
-  assert.deepEqual(sent.find((m) => m.edited), { chatId: '5', messageId: 77, text: '⏰ Essay is due\n\n✅ Done', edited: true });
-  assert.equal(sent.find((m) => m.answer).text, 'Marked as done ✅');
+  assert.deepEqual(sent.find((m) => m.edited), { chatId: '5', messageId: 77, text: '⏰ Essay is due\n\n✅ Виконано', edited: true });
+  assert.equal(sent.find((m) => m.answer).text, 'Позначено як виконане ✅');
 
   sent.length = 0;
   await press(`done:${essay.key}`, 999);
-  assert.deepEqual(sent, [{ queryId: 'q1', text: 'This chat is not linked to Dueboard any more.', answer: true }]);
+  assert.deepEqual(sent, [{ queryId: 'q1', text: 'Цей чат більше не прив’язаний до Dueboard.', answer: true }]);
 });
 
 test('prep: exam on the board, diagnostic test, weak topics and plan, owner-only access', async (t) => {

@@ -225,12 +225,12 @@ test('ai: generate needs a key and slides, checks the count; errors and refusals
   t.after(on.close);
   await on.call('POST', '/api/register', { username: 'taras', password: 'correct horse' });
   const exam = (await on.call('POST', '/api/exams', { title: 'Calculus', examAt: NOW + 5 * 86_400_000 })).data;
-  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /slides first/);
+  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /слайди лекцій/);
   await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'photo.png', data: Buffer.from('png').toString('base64') });
-  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /PDF or PPTX/);
+  assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, {})).data.error, /PDF або PPTX/);
   await on.call('POST', `/api/exams/${exam.id}/materials`, { filename: 'l1.pptx', data: PPTX.toString('base64') });
   for (const count of [0, 31, 2.5, '5']) {
-    assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, { count })).data.error, /1–30 questions/);
+    assert.match((await on.call('POST', `/api/exams/${exam.id}/generate`, { count })).data.error, /1–30 питань/);
   }
   assert.equal(refusing.requests.length, 0);
   const refused = await on.call('POST', `/api/exams/${exam.id}/generate`, {});
@@ -371,7 +371,7 @@ test('ai: DeepSeek uploads PDFs to its Files API and uses JSON mode', async (t) 
   const e = await examWithSlides(cut.call);
   const res = await cut.call('POST', `/api/exams/${e.exam.id}/generate`, {});
   assert.equal(res.status, 502);
-  assert.match(res.data.error, /cut off/);
+  assert.match(res.data.error, /обірвалася/);
 });
 
 test('ai: a model that never answers falls back, and a final timeout is a clear error', async (t) => {
@@ -397,5 +397,5 @@ test('ai: a model that never answers falls back, and a final timeout is a clear 
   const b = await examWithSlides(never.call);
   const r = await never.call('POST', `/api/exams/${b.exam.id}/generate`, { count: 1 });
   assert.equal(r.status, 504);
-  assert.match(r.data.error, /took too long/);
+  assert.match(r.data.error, /надто довго/);
 });

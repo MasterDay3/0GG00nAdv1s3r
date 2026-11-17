@@ -82,16 +82,16 @@ export function materialBlocks(materials) {
         added = [{ type: 'text', text: `${label} (no slides; slide = 0)\n${body}` }];
         slideCount.set(m.id, 0);
       } else {
-        skipped.push({ filename: m.filename, reason: 'only PDF, PPTX, DOCX, TXT and MD files can be read' });
+        skipped.push({ filename: m.filename, reason: 'читаються лише файли PDF, PPTX, DOCX, TXT і MD' });
         continue;
       }
     } catch (err) {
-      skipped.push({ filename: m.filename, reason: `could not read it (${err.message})` });
+      skipped.push({ filename: m.filename, reason: `не вдалося прочитати (${err.message})` });
       continue;
     }
     const addedSize = added.reduce((n, b) => n + (b.text?.length || 0) + (b.source?.data.length || 0), 0);
     if (size + addedSize > MAX_REQUEST) {
-      skipped.push({ filename: m.filename, reason: 'over the size Claude can read at once together with the other files' });
+      skipped.push({ filename: m.filename, reason: 'разом з іншими файлами це більше, ніж модель прочитає за раз' });
       slideCount.delete(m.id);
       continue;
     }
@@ -155,23 +155,23 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     } catch (err) {
       if (err.name !== 'TimeoutError' && err.name !== 'AbortError') {
         console.error(`${label} API unreachable:`, err.message);
-        throw new HttpError(502, `Could not reach ${label}. Try again later.`);
+        throw new HttpError(502, `Не вдалося зв’язатися з ${label}. Спробуйте пізніше.`);
       }
       console.error(`${label} ${body.model} did not answer in ${timeout / 1000} s`);
       if (busyOk) return null;
-      throw new HttpError(504, `${label} took too long to answer. Try again, or ask for fewer questions.`);
+      throw new HttpError(504, `${label} відповідає надто довго. Спробуйте ще раз або попросіть менше питань.`);
     }
     const data = await res.json().catch(() => null);
     if (busyOk && [429, 503].includes(res.status)) return null;
     if (!res.ok) {
       console.error(`${label} API ${res.status}:`, data?.error?.message || JSON.stringify(data?.error || data)?.slice(0, 300) || 'no details');
-      if ([429, 503, 529].includes(res.status)) throw new HttpError(503, `${label} is busy right now. Try again in a minute.`);
-      throw new HttpError(502, 'Could not generate questions right now. Try again later.');
+      if ([429, 503, 529].includes(res.status)) throw new HttpError(503, `${label} зараз перевантажений. Спробуйте за хвилину.`);
+      throw new HttpError(502, 'Зараз не вдалося згенерувати питання. Спробуйте пізніше.');
     }
     return data;
   }
-  const declined = () => new HttpError(422, `${label} declined to write questions from these materials.`);
-  const cutOff = () => new HttpError(502, 'The answer was cut off. Try with fewer topics at once.');
+  const declined = () => new HttpError(422, `${label} відмовився писати питання з цих матеріалів.`);
+  const cutOff = () => new HttpError(502, 'Відповідь обірвалася. Попросіть менше питань за раз.');
 
   // Each returns the model's JSON text. blocks are the Claude-format blocks from materialBlocks.
   const ask = {
@@ -236,7 +236,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
         const file = await res.json().catch(() => null);
         if (!res.ok || !(file?.id || file?.file_id)) {
           console.error(`DeepSeek file upload ${res.status}:`, JSON.stringify(file)?.slice(0, 300));
-          throw new HttpError(502, `DeepSeek could not read ${b.title}. Try again later or upload it as PPTX.`);
+          throw new HttpError(502, `DeepSeek не зміг прочитати ${b.title}. Спробуйте пізніше або завантажте файл як PPTX.`);
         }
         content.push({ type: 'file', file_id: file.id || file.file_id });
       }
@@ -259,9 +259,9 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
 
   // count: how many questions; topics: the exam's topics so far, [{ name, existing: [prompt] }]; materials: [{ id, filename, data }]
   async function generateQuestions({ examTitle, count = COUNT.default, topics = [], materials }) {
-    if (!apiKey) throw new HttpError(503, 'AI questions are not set up on this server (AI_API_KEY is missing)');
+    if (!apiKey) throw new HttpError(503, 'AI-питання на цьому сервері не налаштовані (немає AI_API_KEY)');
     const { blocks, slideCount, skipped } = materialBlocks(materials);
-    if (!blocks.length) throw new HttpError(400, 'None of the uploaded files can be read. Upload slides as PDF or PPTX.');
+    if (!blocks.length) throw new HttpError(400, 'Жоден із завантажених файлів не читається. Завантажте слайди як PDF або PPTX.');
     const topicList = topics.map((t) => [
       `- ${t.name}`,
       ...t.existing.map((p) => `    already has: ${p.slice(0, 200).replace(/\s+/g, ' ')}`),
@@ -274,7 +274,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new HttpError(502, `${label} sent back something that is not a question list. Try again.`);
+      throw new HttpError(502, `${label} повернув щось, що не схоже на список питань. Спробуйте ще раз.`);
     }
     return { questions: cleanQuestions(parsed?.questions, count, slideCount), skipped };
   }

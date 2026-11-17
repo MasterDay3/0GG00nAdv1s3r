@@ -20,8 +20,8 @@ const MAX_FEED = 5 * 1024 * 1024;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
 const MINUTE = 60 * 1000;
-const BOT_WALL_MESSAGE = 'Your Moodle is behind a bot check that blocks automatic sync. '
-  + 'In Moodle use Export calendar → "Export" to download the .ics file, then import it below.';
+const BOT_WALL_MESSAGE = 'Ваш Moodle захищений перевіркою на бота, тож автоматична синхронізація не працює. '
+  + 'У Moodle натисніть Експорт календаря → «Експортувати», завантажте файл .ics і імпортуйте його нижче.';
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
@@ -66,13 +66,13 @@ function parseCookies(header = '') {
 
 async function readJson(req, limit) {
   if (!(req.headers['content-type'] || '').startsWith('application/json')) {
-    throw new HttpError(415, 'Expected application/json');
+    throw new HttpError(415, 'Очікувався application/json');
   }
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw new HttpError(413, 'Request is too large');
+    if (size > limit) throw new HttpError(413, 'Запит завеликий');
     chunks.push(chunk);
   }
   if (!size) return {};
@@ -81,7 +81,7 @@ async function readJson(req, limit) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error();
     return body;
   } catch {
-    throw new HttpError(400, 'Invalid JSON');
+    throw new HttpError(400, 'Некоректний JSON');
   }
 }
 
@@ -91,9 +91,9 @@ function sendJson(res, status, data) {
 }
 
 function normalizeFeedUrl(value) {
-  let url = text(value, 'Calendar link', { max: 2000, required: false });
+  let url = text(value, 'Посилання на календар', { max: 2000, required: false });
   if (/^webcals?:\/\//i.test(url)) url = url.replace(/^webcals?:/i, 'https:');
-  return link(url, 'Calendar link');
+  return link(url, 'Посилання на календар');
 }
 
 export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.fetch, telegram, secureCookies = false, ai = createAi() }) {
@@ -125,7 +125,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     if (wait > 0) {
       const seconds = Math.ceil(wait / 1000);
       res.setHeader('retry-after', String(seconds));
-      throw new HttpError(429, `Too many attempts. Try again in ${Math.ceil(seconds / 60)} min.`);
+      throw new HttpError(429, `Забагато спроб. Спробуйте за ${Math.ceil(seconds / 60)} хв.`);
     }
   }
 
@@ -176,7 +176,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   function markDone(user, key, isDone) {
     if (!/^d\d+$/.test(key) || !boardItems(user).some((item) => item.key === key)) {
-      throw new HttpError(404, 'Deadline not found');
+      throw new HttpError(404, 'Дедлайн не знайдено');
     }
     if (isDone) {
       run('INSERT OR IGNORE INTO done (user_id, item_key, done_at) VALUES (?, ?, ?)', user.id, key, now());
@@ -247,7 +247,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   }
 
   async function syncMoodle(user) {
-    if (!user.ics_url) throw new HttpError(400, 'Add your Moodle calendar link first');
+    if (!user.ics_url) throw new HttpError(400, 'Спершу додайте посилання на календар Moodle');
     let body;
     try {
       const res = await fetchImpl(user.ics_url, { signal: AbortSignal.timeout(15_000) });
@@ -255,14 +255,14 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       if (res.headers.get('cf-mitigated') === 'challenge' || cloudflareBlock) {
         throw new HttpError(502, BOT_WALL_MESSAGE);
       }
-      if (!res.ok) throw new HttpError(502, `Moodle answered with status ${res.status}`);
+      if (!res.ok) throw new HttpError(502, `Moodle відповів зі статусом ${res.status}`);
       body = await res.text();
     } catch (err) {
       if (err instanceof HttpError) throw err;
-      throw new HttpError(502, 'Could not reach the calendar link');
+      throw new HttpError(502, 'Не вдалося відкрити посилання на календар');
     }
-    if (body.length > MAX_FEED) throw new HttpError(502, 'The calendar is too large');
-    if (!/BEGIN:VCALENDAR/i.test(body)) throw new HttpError(502, 'That link did not return a calendar');
+    if (body.length > MAX_FEED) throw new HttpError(502, 'Календар завеликий');
+    if (!/BEGIN:VCALENDAR/i.test(body)) throw new HttpError(502, 'За цим посиланням немає календаря');
     const imported = importEvents(user, parseIcs(body), new URL(user.ics_url).origin);
     run('UPDATE users SET last_sync_at = ? WHERE id = ?', now(), user.id);
     return imported;
@@ -272,7 +272,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   function ownExam(user, id) {
     const exam = one('SELECT * FROM exams WHERE id = ? AND user_id = ?', id, user.id);
-    if (!exam) throw new HttpError(404, 'Exam not found');
+    if (!exam) throw new HttpError(404, 'Екзамен не знайдено');
     return exam;
   }
 
@@ -280,7 +280,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const topic = one(
       'SELECT t.* FROM topics t JOIN exams e ON e.id = t.exam_id WHERE t.id = ? AND e.user_id = ?', id, user.id,
     );
-    if (!topic) throw new HttpError(404, 'Topic not found');
+    if (!topic) throw new HttpError(404, 'Тему не знайдено');
     return topic;
   }
 
@@ -326,12 +326,12 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('POST', '/api/register', async ({ req, body, res }) => {
     const ip = clientIp(req);
     guard(res, [limits.registerIp, ip]);
-    const username = text(body.username, 'Username', { max: 32 });
-    if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Username: 3–32 letters, digits or _');
+    const username = text(body.username, 'Логін', { max: 32 });
+    if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) throw new HttpError(400, 'Логін: 3–32 латинські літери, цифри або _');
     if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 200) {
-      throw new HttpError(400, 'Password must be at least 8 characters');
+      throw new HttpError(400, 'Пароль має бути не коротшим за 8 символів');
     }
-    if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'That username is taken');
+    if (one('SELECT 1 FROM users WHERE username = ?', username)) throw new HttpError(409, 'Цей логін уже зайнятий');
     limits.registerIp.hit(ip);
     const { lastInsertRowid } = run('INSERT INTO users (username, pass_hash) VALUES (?, ?)', username, await hashPassword(body.password));
     startSession(res, Number(lastInsertRowid));
@@ -351,7 +351,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     if (!user || !valid) {
       limits.loginFails.hit(pair);
       limits.accountFails.hit(account);
-      throw new HttpError(401, 'Wrong username or password');
+      throw new HttpError(401, 'Неправильний логін або пароль');
     }
     limits.loginFails.reset(pair);
     startSession(res, user.id);
@@ -375,7 +375,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   // ---------- routes: groups ----------
 
   route('POST', '/api/group', ({ user, body }) => {
-    const name = text(body.name, 'Group name', { max: 80 });
+    const name = text(body.name, 'Назва групи', { max: 80 });
     const code = randomBytes(4).toString('hex').toUpperCase();
     const { lastInsertRowid } = run('INSERT INTO study_groups (name, join_code) VALUES (?, ?)', name, code);
     run('UPDATE users SET group_id = ? WHERE id = ?', Number(lastInsertRowid), user.id);
@@ -383,9 +383,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   });
 
   route('POST', '/api/group/join', ({ user, body }) => {
-    const code = text(body.code, 'Group code', { max: 16 }).toUpperCase();
+    const code = text(body.code, 'Код групи', { max: 16 }).toUpperCase();
     const group = one('SELECT * FROM study_groups WHERE join_code = ?', code);
-    if (!group) throw new HttpError(404, 'No group with that code');
+    if (!group) throw new HttpError(404, 'Групи з таким кодом немає');
     run('UPDATE users SET group_id = ? WHERE id = ?', group.id, user.id);
     return { name: group.name, code: group.join_code };
   });
@@ -400,12 +400,12 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('GET', '/api/deadlines', ({ user }) => ({ now: now(), items: boardItems(user) }));
 
   route('POST', '/api/deadlines', ({ user, body }) => {
-    const title = text(body.title, 'Title');
-    const course = text(body.course, 'Course', { max: 100, required: false });
-    const dueAt = timestamp(body.dueAt, 'Due date');
+    const title = text(body.title, 'Назва');
+    const course = text(body.course, 'Курс', { max: 100, required: false });
+    const dueAt = timestamp(body.dueAt, 'Термін');
     const url = link(body.url);
     const shared = body.shared === true;
-    if (shared && !user.group_id) throw new HttpError(400, 'Join a group to share deadlines');
+    if (shared && !user.group_id) throw new HttpError(400, 'Щоб ділитися дедлайнами, приєднайтеся до групи');
     const { lastInsertRowid } = run(
       `INSERT INTO deadlines (owner_user_id, group_id, created_by, source, course, title, url, due_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -424,20 +424,20 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
          AND (owner_user_id = ? OR (group_id IS NOT NULL AND group_id = ?))`,
       params.id, user.id, user.id, user.group_id ?? -1,
     );
-    if (!changes) throw new HttpError(404, 'Deadline not found');
+    if (!changes) throw new HttpError(404, 'Дедлайн не знайдено');
     forgetDeadline(params.id);
     return { ok: true };
   });
 
   route('PUT', '/api/done', ({ user, body }) => {
-    markDone(user, text(body.key, 'Item', { max: 24 }), body.done !== false);
+    markDone(user, text(body.key, 'Запис', { max: 24 }), body.done !== false);
     return { ok: true };
   });
 
   route('PUT', '/api/notes', ({ user, body }) => {
-    const key = text(body.key, 'Item', { max: 24 });
-    const note = text(body.text, 'Note', { max: 2000, required: false });
-    if (!boardItems(user).some((item) => item.key === key)) throw new HttpError(404, 'Deadline not found');
+    const key = text(body.key, 'Запис', { max: 24 });
+    const note = text(body.text, 'Нотатка', { max: 2000, required: false });
+    if (!boardItems(user).some((item) => item.key === key)) throw new HttpError(404, 'Дедлайн не знайдено');
     if (note) {
       run(`INSERT INTO notes (user_id, item_key, text) VALUES (?, ?, ?)
            ON CONFLICT (user_id, item_key) DO UPDATE SET text = excluded.text`, user.id, key, note);
@@ -450,8 +450,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('POST', '/api/sync', async ({ user }) => ({ imported: await syncMoodle(user) }));
 
   route('POST', '/api/import-ics', ({ user, body }) => {
-    const ics = text(body.ics, 'Calendar file', { max: MAX_FEED });
-    if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'That is not an .ics calendar');
+    const ics = text(body.ics, 'Файл календаря', { max: MAX_FEED });
+    if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'Це не календар .ics');
     return { imported: importEvents(user, parseIcs(ics), null) };
   }, { limit: MAX_FEED + 4096 });
 
@@ -471,8 +471,8 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   route('GET', '/api/extension/config', ({ user }) => ({ icsUrl: user.ics_url || '' }), { auth: 'extension' });
 
   route('POST', '/api/extension/upload', ({ user, body }) => {
-    const ics = text(body.ics, 'Calendar', { max: MAX_FEED });
-    if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'That is not an .ics calendar');
+    const ics = text(body.ics, 'Календар', { max: MAX_FEED });
+    if (!/BEGIN:VCALENDAR/i.test(ics)) throw new HttpError(400, 'Це не календар .ics');
     const origin = user.ics_url ? new URL(user.ics_url).origin : null;
     const imported = importEvents(user, parseIcs(ics), origin);
     run('UPDATE users SET last_sync_at = ? WHERE id = ?', now(), user.id);
@@ -482,7 +482,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
   // ---------- routes: telegram ----------
 
   route('POST', '/api/telegram/link', async ({ user }) => {
-    if (!telegram.enabled) throw new HttpError(409, 'Telegram is not set up on this server (TELEGRAM_BOT_TOKEN)');
+    if (!telegram.enabled) throw new HttpError(409, 'Telegram на цьому сервері не налаштований (TELEGRAM_BOT_TOKEN)');
     const code = randomBytes(6).toString('hex');
     run('UPDATE users SET tg_link_code = ? WHERE id = ?', code, user.id);
     return { code, botName: await telegram.botName() };
@@ -500,9 +500,9 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       .map((e) => ({ id: e.id, title: e.title, course: e.course, examAt: e.exam_at })));
 
   route('POST', '/api/exams', ({ user, body }) => {
-    const title = text(body.title, 'Exam name');
-    const course = text(body.course, 'Course', { max: 100, required: false });
-    const examAt = timestamp(body.examAt, 'Exam date');
+    const title = text(body.title, 'Назва екзамену');
+    const course = text(body.course, 'Курс', { max: 100, required: false });
+    const examAt = timestamp(body.examAt, 'Дата екзамену');
     const { lastInsertRowid } = run('INSERT INTO exams (user_id, course, title, exam_at) VALUES (?, ?, ?, ?)', user.id, course, title, examAt);
     return { id: Number(lastInsertRowid) };
   });
@@ -518,7 +518,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   route('POST', '/api/exams/:id/topics', ({ user, params, body }) => {
     ownExam(user, params.id);
-    const name = text(body.name, 'Topic', { max: 120 });
+    const name = text(body.name, 'Тема', { max: 120 });
     const { lastInsertRowid } = run('INSERT INTO topics (exam_id, name) VALUES (?, ?)', params.id, name);
     return { id: Number(lastInsertRowid), name };
   });
@@ -531,13 +531,13 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   route('POST', '/api/topics/:id/questions', ({ user, params, body }) => {
     ownTopic(user, params.id);
-    const prompt = text(body.prompt, 'Question', { max: 1000 });
+    const prompt = text(body.prompt, 'Питання', { max: 1000 });
     if (!Array.isArray(body.options) || body.options.length < 2 || body.options.length > 6) {
-      throw new HttpError(400, 'A question needs 2–6 answer options');
+      throw new HttpError(400, 'Питанню потрібно 2–6 варіантів відповіді');
     }
-    const options = body.options.map((o, i) => text(o, `Option ${i + 1}`, { max: 300 }));
+    const options = body.options.map((o, i) => text(o, `Варіант ${i + 1}`, { max: 300 }));
     if (!Number.isInteger(body.answerIndex) || body.answerIndex < 0 || body.answerIndex >= options.length) {
-      throw new HttpError(400, 'Pick which option is correct');
+      throw new HttpError(400, 'Вкажіть правильний варіант');
     }
     const { lastInsertRowid } = run(
       'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
@@ -551,13 +551,13 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       `DELETE FROM questions WHERE id = ? AND topic_id IN
          (SELECT t.id FROM topics t JOIN exams e ON e.id = t.exam_id WHERE e.user_id = ?)`, params.id, user.id,
     );
-    if (!changes) throw new HttpError(404, 'Question not found');
+    if (!changes) throw new HttpError(404, 'Питання не знайдено');
     return { ok: true };
   });
 
   route('POST', '/api/topics/:id/problems', ({ user, params, body }) => {
     ownTopic(user, params.id);
-    const problem = text(body.text, 'Practice problem', { max: 4000 });
+    const problem = text(body.text, 'Задача', { max: 4000 });
     const { lastInsertRowid } = run('INSERT INTO problems (topic_id, text) VALUES (?, ?)', params.id, problem);
     return { id: Number(lastInsertRowid) };
   });
@@ -567,19 +567,19 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       `DELETE FROM problems WHERE id = ? AND topic_id IN
          (SELECT t.id FROM topics t JOIN exams e ON e.id = t.exam_id WHERE e.user_id = ?)`, params.id, user.id,
     );
-    if (!changes) throw new HttpError(404, 'Problem not found');
+    if (!changes) throw new HttpError(404, 'Задачу не знайдено');
     return { ok: true };
   });
 
   route('POST', '/api/exams/:id/materials', ({ user, params, body }) => {
     ownExam(user, params.id);
-    const filename = text(body.filename, 'File name', { max: 200 }).replace(/[\r\n"\\/]/g, '_');
+    const filename = text(body.filename, 'Назва файлу', { max: 200 }).replace(/[\r\n"\\/]/g, '_');
     if (typeof body.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.data)) {
-      throw new HttpError(400, 'File data must be base64');
+      throw new HttpError(400, 'Дані файлу мають бути в base64');
     }
     const data = Buffer.from(body.data, 'base64');
-    if (!data.length) throw new HttpError(400, 'The file is empty');
-    if (data.length > MAX_FILE) throw new HttpError(413, 'Files are limited to 10 MB');
+    if (!data.length) throw new HttpError(400, 'Файл порожній');
+    if (data.length > MAX_FILE) throw new HttpError(413, 'Файл не може бути більшим за 10 МБ');
     const { lastInsertRowid } = run(
       'INSERT INTO materials (exam_id, filename, size, data, created_at) VALUES (?, ?, ?, ?, ?)',
       params.id, filename, data.length, data, now(),
@@ -591,7 +591,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const material = one(
       `SELECT m.* FROM materials m JOIN exams e ON e.id = m.exam_id WHERE m.id = ? AND e.user_id = ?`, params.id, user.id,
     );
-    if (!material) throw new HttpError(404, 'File not found');
+    if (!material) throw new HttpError(404, 'Файл не знайдено');
     res.writeHead(200, {
       'content-type': 'application/octet-stream',
       'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(material.filename)}`,
@@ -604,7 +604,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const { changes } = run(
       `DELETE FROM materials WHERE id = ? AND exam_id IN (SELECT id FROM exams WHERE user_id = ?)`, params.id, user.id,
     );
-    if (!changes) throw new HttpError(404, 'File not found');
+    if (!changes) throw new HttpError(404, 'Файл не знайдено');
     return { ok: true };
   });
 
@@ -627,7 +627,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const exam = ownExam(user, params.id);
     const answers = body.answers && typeof body.answers === 'object' && !Array.isArray(body.answers) ? body.answers : {};
     const questions = examQuestions(exam.id);
-    if (!questions.length) throw new HttpError(400, 'Add some questions first');
+    if (!questions.length) throw new HttpError(400, 'Спершу додайте питання');
     const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
     const result = scoreDiagnostic(topics, questions, answers);
     run('INSERT INTO attempts (exam_id, created_at, result) VALUES (?, ?, ?)', exam.id, now(), JSON.stringify(result));
@@ -654,14 +654,14 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const exam = ownExam(user, params.id);
     const count = body.count === undefined ? COUNT.default : body.count;
     if (!Number.isInteger(count) || count < COUNT.min || count > COUNT.max) {
-      throw new HttpError(400, `Ask for ${COUNT.min}–${COUNT.max} questions at a time`);
+      throw new HttpError(400, `За раз можна згенерувати ${COUNT.min}–${COUNT.max} питань`);
     }
     const topics = all('SELECT id, name FROM topics WHERE exam_id = ? ORDER BY id', exam.id);
     const materials = all('SELECT id, filename, data FROM materials WHERE exam_id = ? ORDER BY id', exam.id);
-    if (!materials.length) throw new HttpError(400, 'Upload your lecture slides first');
-    if (generating.has(user.id)) throw new HttpError(409, 'Questions are already being generated. Wait for them to finish.');
+    if (!materials.length) throw new HttpError(400, 'Спершу завантажте слайди лекцій');
+    if (generating.has(user.id)) throw new HttpError(409, 'Питання вже генеруються. Зачекайте, доки закінчиться.');
     const { runs } = one('SELECT COUNT(*) AS runs FROM ai_runs WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
-    if (runs >= AI_RUNS_PER_DAY) throw new HttpError(429, `You can generate questions ${AI_RUNS_PER_DAY} times a day. Try again tomorrow.`);
+    if (runs >= AI_RUNS_PER_DAY) throw new HttpError(429, `Генерувати питання можна ${AI_RUNS_PER_DAY} разів на день. Спробуйте завтра.`);
 
     const existing = examQuestions(exam.id);
     generating.add(user.id);
@@ -712,7 +712,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
   async function serveStatic(pathname, res) {
     const file = STATIC[pathname];
-    if (!file) throw new HttpError(404, 'Not found');
+    if (!file) throw new HttpError(404, 'Не знайдено');
     const body = await readFile(new URL(`../public/${file[0]}`, import.meta.url));
     res.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-cache' });
     res.end(body);
@@ -723,16 +723,16 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     try {
       const { pathname } = new URL(req.url, 'http://localhost');
       if (!pathname.startsWith('/api/')) {
-        if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
+        if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Метод не підтримується');
         return await serveStatic(pathname, res);
       }
       const match = routes.find((r) => r.method === req.method && r.re.test(pathname));
-      if (!match) throw new HttpError(404, 'Not found');
+      if (!match) throw new HttpError(404, 'Не знайдено');
       const params = Object.fromEntries(
         Object.entries(match.re.exec(pathname).groups || {}).map(([k, v]) => [k, Number(v)]),
       );
       const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
-      if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Extension is not connected' : 'Please log in');
+      if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Розширення не під’єднане' : 'Увійдіть у свій акаунт');
       const body = ['POST', 'PUT'].includes(req.method) ? await readJson(req, match.limit) : {};
       const result = await match.fn({ req, res, user, params, body });
       if (!res.headersSent) sendJson(res, 200, result);
@@ -740,7 +740,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       if (res.headersSent) return res.destroy();
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
       console.error(err);
-      sendJson(res, 500, { error: 'Something went wrong' });
+      sendJson(res, 500, { error: 'Щось пішло не так' });
     }
   }
 
@@ -772,13 +772,13 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
     const chatId = query.message?.chat?.id;
     const user = chatId != null && one('SELECT * FROM users WHERE tg_chat_id = ?', String(chatId));
     const key = /^done:(d\d+)$/.exec(query.data || '')?.[1];
-    let answer = 'This deadline is gone from your board.';
-    if (!user) answer = 'This chat is not linked to Dueboard any more.';
+    let answer = 'Цього дедлайну вже немає на вашій дошці.';
+    if (!user) answer = 'Цей чат більше не прив’язаний до Dueboard.';
     else if (key) {
       try {
         markDone(user, key, true);
-        answer = 'Marked as done ✅';
-        await telegram.editMessage(String(chatId), query.message.message_id, `${query.message.text}\n\n✅ Done`);
+        answer = 'Позначено як виконане ✅';
+        await telegram.editMessage(String(chatId), query.message.message_id, `${query.message.text}\n\n✅ Виконано`);
       } catch (err) {
         if (!(err instanceof HttpError)) console.error('Telegram done button failed:', err.message);
       }
@@ -800,7 +800,7 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
 
     if (command === '/start' && arg) {
       const target = /^[a-f0-9]{12}$/.test(arg) && one('SELECT * FROM users WHERE tg_link_code = ?', arg);
-      if (!target) return reply('That link has expired. Open Dueboard → Settings → "Connect Telegram" to get a new one.');
+      if (!target) return reply('Посилання застаріло. Відкрийте Dueboard → Налаштування → «Під’єднати Telegram», щоб отримати нове.');
       // One chat follows one Dueboard account.
       run('UPDATE users SET tg_chat_id = NULL WHERE tg_chat_id = ? AND id != ?', chatId, target.id);
       run('UPDATE users SET tg_chat_id = ?, tg_link_code = NULL WHERE id = ?', chatId, target.id);
@@ -814,13 +814,13 @@ export function createApp({ db, now = () => Date.now(), fetchImpl = globalThis.f
       const on = !user.tg_digest;
       run('UPDATE users SET tg_digest = ? WHERE id = ?', on ? 1 : 0, user.id);
       return reply(on
-        ? `Morning digest is on. You'll get it at ${DIGEST_HOUR}:00 when something is due that week.`
-        : 'Morning digest is off. Reminders 3 days and 1 day before each deadline still come. Send /digest to turn it back on.');
+        ? `Ранковий дайджест увімкнено. Він приходитиме о ${DIGEST_HOUR}:00, коли цього тижня щось треба здати.`
+        : 'Ранковий дайджест вимкнено. Нагадування за 3 дні й за 1 день до дедлайну й далі приходитимуть. Надішліть /digest, щоб увімкнути його знову.');
     }
     if (command === '/stop') {
       if (!user) return reply(NOT_LINKED);
       run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
-      return reply('Unlinked. You will not get any more messages. Connect again from Dueboard → Settings.');
+      return reply('Чат відв’язано, повідомлень більше не буде. Під’єднатися знову можна в Dueboard → Налаштування.');
     }
     return reply(helpText(Boolean(user)));
   }

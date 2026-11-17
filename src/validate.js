@@ -16,20 +16,20 @@ export function isHttpUrl(value) {
 
 export function text(value, label, { max = 200, required = true } = {}) {
   if (value === undefined || value === null) value = '';
-  if (typeof value !== 'string') throw new HttpError(400, `${label} must be text`);
+  if (typeof value !== 'string') throw new HttpError(400, `${label}: має бути текстом`);
   value = value.trim();
-  if (required && !value) throw new HttpError(400, `${label} is required`);
-  if (value.length > max) throw new HttpError(400, `${label} is too long (max ${max})`);
+  if (required && !value) throw new HttpError(400, `${label}: обов’язкове поле`);
+  if (value.length > max) throw new HttpError(400, `${label}: задовго (максимум ${max} символів)`);
   return value;
 }
 
-export function link(value, label = 'Link') {
+export function link(value, label = 'Посилання') {
   const url = text(value, label, { max: 2000, required: false });
-  if (url && !isHttpUrl(url)) throw new HttpError(400, `${label} must start with http:// or https://`);
+  if (url && !isHttpUrl(url)) throw new HttpError(400, `${label}: має починатися з http:// або https://`);
   return url;
 }
 
 export function timestamp(value, label) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new HttpError(400, `${label} must be a date`);
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new HttpError(400, `${label}: має бути датою`);
   return Math.round(value);
 }

@@ -22,16 +22,16 @@ async function setStatus(ok, message) {
 
 async function dueboard(path, init = {}) {
   const { server, key } = await chrome.storage.local.get(['server', 'key']);
-  if (!server || !key) throw new Error('Not connected. Open Dueboard → Settings → Connect extension.');
+  if (!server || !key) throw new Error('Не під’єднано. Відкрийте Dueboard → Налаштування → «Під’єднати розширення».');
   let res;
   try {
     res = await fetch(server + path, { ...init, headers: { ...init.headers, authorization: `Bearer ${key}` } });
   } catch {
-    throw new Error(`Dueboard is not reachable at ${server}. Is it running?`);
+    throw new Error(`Dueboard недоступний за адресою ${server}. Сервер працює?`);
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) throw new Error('Dueboard no longer accepts this extension. Connect it again in Settings.');
-  if (!res.ok) throw new Error(data.error || `Dueboard error ${res.status}`);
+  if (res.status === 401) throw new Error('Dueboard більше не приймає це розширення. Під’єднайте його знову в Налаштуваннях.');
+  if (!res.ok) throw new Error(data.error || `Помилка Dueboard ${res.status}`);
   return data;
 }
 
@@ -41,13 +41,13 @@ async function upload(ics) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ics }),
   });
-  await setStatus(true, `Synced ${imported} Moodle events`);
+  await setStatus(true, `Синхронізовано подій Moodle: ${imported}`);
   return { ok: true, imported };
 }
 
 async function calendarLink() {
   const { icsUrl } = await dueboard('/api/extension/config');
-  if (!icsUrl) throw new Error('Add your Moodle calendar link in Dueboard → Settings.');
+  if (!icsUrl) throw new Error('Додайте посилання на календар Moodle в Dueboard → Налаштування.');
   return icsUrl;
 }
 
@@ -56,7 +56,7 @@ async function sync() {
     const res = await fetch(await calendarLink(), { credentials: 'include' });
     const ics = await res.text();
     if (!res.ok || !/BEGIN:VCALENDAR/i.test(ics)) {
-      throw new Error('Moodle wants a browser check. Open Moodle once and it will sync from there.');
+      throw new Error('Moodle просить пройти перевірку браузера. Відкрийте Moodle, і синхронізація запуститься звідти.');
     }
     return await upload(ics);
   } catch (err) {

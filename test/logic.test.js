@@ -97,8 +97,8 @@ test('diagnostic: 70% or more is strong, unanswered counts as wrong, no question
 });
 
 test('bot: Kyiv time, including the summer/winter clock change', () => {
-  assert.equal(formatDue(Date.UTC(2026, 10, 16, 21, 59)), 'Mon 16 Nov, 23:59');
-  assert.equal(formatDue(Date.UTC(2026, 6, 1, 20, 59)), 'Wed 1 Jul, 23:59');
+  assert.equal(formatDue(Date.UTC(2026, 10, 16, 21, 59)), 'пн, 16 лист., 23:59');
+  assert.equal(formatDue(Date.UTC(2026, 6, 1, 20, 59)), 'ср, 1 лип., 23:59');
   assert.deepEqual(localParts(Date.UTC(2026, 10, 14, 22, 30)), { date: '2026-11-15', hour: 0 });
 });
 

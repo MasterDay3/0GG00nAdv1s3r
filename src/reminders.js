@@ -14,8 +14,8 @@ export function dueReminders(items, sent, now) {
 }
 
 export function reminderText(item, kind) {
-  const when = kind === '1d' ? 'in less than 1 day' : 'in 3 days';
+  const when = kind === '1d' ? 'менш ніж за добу' : 'через 3 дні';
   const course = item.course ? `[${item.course}] ` : '';
   const due = formatDue(item.dueAt);
-  return `⏰ ${course}${item.title} is due ${when} (${due}).${item.url ? `\n${item.url}` : ''}`;
+  return `⏰ ${course}${item.title}: термін ${when} (${due}).${item.url ? `\n${item.url}` : ''}`;
 }

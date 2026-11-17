@@ -9,16 +9,16 @@ const LIST_LIMIT = 15;
 const ICON = { overdue: '⚫', red: '🔴', amber: '🟡', grey: '⚪' };
 
 export const COMMANDS = [
-  { command: 'deadlines', description: 'Your upcoming deadlines' },
-  { command: 'digest', description: 'Turn the morning digest on or off' },
-  { command: 'help', description: 'What this bot can do' },
-  { command: 'stop', description: 'Unlink this chat from Dueboard' },
+  { command: 'deadlines', description: 'Найближчі дедлайни' },
+  { command: 'digest', description: 'Увімкнути чи вимкнути ранковий дайджест' },
+  { command: 'help', description: 'Що вміє цей бот' },
+  { command: 'stop', description: 'Відв’язати цей чат від Dueboard' },
 ];
 
-export const NOT_LINKED = 'This chat is not linked to Dueboard yet. Open Dueboard → Settings → "Connect Telegram".';
+export const NOT_LINKED = 'Цей чат ще не прив’язаний до Dueboard. Відкрийте Dueboard → Налаштування → «Під’єднати Telegram».';
 
 export function formatDue(ms, timeZone = TIME_ZONE) {
-  return new Date(ms).toLocaleString('en-GB', {
+  return new Date(ms).toLocaleString('uk-UA', {
     timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   });
 }
@@ -37,43 +37,43 @@ const clip = (s, max) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
 export function itemLine(item, now) {
   const course = item.course ? `[${clip(item.course, 60)}] ` : '';
-  const kind = item.source === 'exam' ? ' (exam)' : '';
+  const kind = item.source === 'exam' ? ' (екзамен)' : '';
   const link = item.url ? `\n   ${item.url}` : '';
   return `${ICON[urgency(item.dueAt, now)]} ${course}${clip(item.title, 200)}${kind}\n   ${formatDue(item.dueAt)}${link}`;
 }
 
 function list(items, now) {
   const shown = items.slice(0, LIST_LIMIT).map((item) => itemLine(item, now));
-  if (items.length > LIST_LIMIT) shown.push(`…and ${items.length - LIST_LIMIT} more on the website.`);
+  if (items.length > LIST_LIMIT) shown.push(`…і ще ${items.length - LIST_LIMIT} на сайті.`);
   return shown.join('\n');
 }
 
 export function deadlinesText(items, now) {
   const upcoming = items.filter((item) => item.dueAt > now);
-  if (!upcoming.length) return 'Nothing due. Enjoy the free time! 🎉';
-  return `Upcoming deadlines:\n\n${list(upcoming, now)}`;
+  if (!upcoming.length) return 'Нічого не горить. Насолоджуйтеся вільним часом! 🎉';
+  return `Найближчі дедлайни:\n\n${list(upcoming, now)}`;
 }
 
 // Deadlines in the next 7 days, or null when there are none (then no digest is sent).
 export function digestText(items, now) {
   const week = items.filter((item) => item.dueAt > now && item.dueAt <= now + 7 * DAY);
   if (!week.length) return null;
-  return `☀️ Good morning! Due in the next 7 days:\n\n${list(week, now)}`;
+  return `☀️ Доброго ранку! Дедлайни на найближчі 7 днів:\n\n${list(week, now)}`;
 }
 
 export function groupDeadlineText(author, item, now) {
-  return `📌 ${author} added a deadline for your group:\n\n${itemLine(item, now)}`;
+  return `📌 ${author} додає дедлайн для вашої групи:\n\n${itemLine(item, now)}`;
 }
 
 export function linkedText(username) {
-  return `Linked to Dueboard as ${username}. You'll get reminders 3 days and 1 day before each deadline `
-    + `and a short digest at ${DIGEST_HOUR}:00 when something is due that week.\n\n${commandList()}`;
+  return `Чат прив’язано до Dueboard як ${username}. Нагадування приходитимуть за 3 дні й за 1 день до кожного дедлайну, `
+    + `а о ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня щось треба здати.\n\n${commandList()}`;
 }
 
 export function helpText(linked) {
-  if (!linked) return `Hi! I'm the Dueboard bot. ${NOT_LINKED}`;
-  return `I remind you about deadlines 3 days and 1 day ahead and send a digest at ${DIGEST_HOUR}:00 `
-    + `when something is due that week.\n\n${commandList()}`;
+  if (!linked) return `Привіт! Я бот Dueboard. ${NOT_LINKED}`;
+  return `Я нагадую про дедлайни за 3 дні й за 1 день і надсилаю дайджест о ${DIGEST_HOUR}:00, `
+    + `коли цього тижня щось треба здати.\n\n${commandList()}`;
 }
 
 function commandList() {
