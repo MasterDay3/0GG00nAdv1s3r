@@ -711,7 +711,7 @@ function aiBlock(exam, reload) {
       const n = Number(count.value);
       button.disabled = true;
       count.disabled = true;
-      button.textContent = 'Generating… (up to a minute)';
+      button.textContent = 'Generating… (usually under a minute)';
       const r = await act(() => api('POST', `/api/exams/${exam.id}/generate`, { count: n }));
       if (r) {
         const skipped = r.skipped.map((s) => ` Skipped ${s.filename}: ${s.reason}.`).join('');

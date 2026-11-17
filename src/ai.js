@@ -8,7 +8,7 @@ export const PROVIDERS = {
   claude: { model: MODEL, label: 'Claude' },
   // A busy Gemini model answers 503 "high demand" or does not answer at all; then the next one is tried.
   // gemini-3.8-flash was often overloaded in Nov 2026, so the default is the one that answered reliably.
-  gemini: { model: 'gemini-3-flash-preview', label: 'Gemini', fallbacks: ['gemini-3.8-flash'], attemptTimeout: 90_000 },
+  gemini: { model: 'gemini-3-flash-preview', label: 'Gemini', fallbacks: ['gemini-3.8-flash'], attemptTimeout: 150_000 },
   deepseek: { model: 'deepseek-flash', label: 'DeepSeek' },
 };
 // How many questions one run writes: the student picks the number.
