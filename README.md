@@ -12,16 +12,19 @@ a day-by-day plan counted back from the exam date, and progress across attempts.
 ## Repository layout
 
 ```
-backend/     Node.js server: HTTP API, SQLite, Moodle sync, Telegram bot, AI questions
+backend/     Node.js server: HTTP API, SQLite, Moodle sync, Telegram bot, AI features
   src/         main.js starts the server; app.js holds the routes; one module per concern (ics, reminders, ai, ...)
   test/        node:test suites (API, logic, security), run with npm test
   package.json
 frontend/
   web/         the site: a single-page app in plain JavaScript (no build step), styles, service worker, icons
   extension/   Chrome extension that syncs Moodle from the student's browser (see below)
-infra/       production setup: setup.sh (install or update a server), autodeploy.sh, systemd units
+infra/       production: setup.sh (install or update a server), autodeploy.sh, systemd units
 CHANGELOG.md what changed, by release
 ```
+
+Each part has its own README with a map of its files: [backend](backend/README.md),
+[frontend](frontend/README.md), [infra](infra/README.md).
 
 The backend serves `frontend/web/` itself, so one process is the whole app. There are no npm dependencies: the server
 uses only Node.js built-ins (`node:http`, `node:sqlite`, `node:crypto`, `node:test`), and the frontend is plain

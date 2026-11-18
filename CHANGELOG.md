@@ -26,6 +26,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
 
 ### Changed
+- `infra`: `backend/`, `frontend/` and `infra/` each have a README with a map of their files.
 - `infra`: The repository has three parts: `backend/` (server, tests, package.json), `frontend/` (`web/`, the site, and `extension/`, the Chrome extension) and `infra/` (setup, auto-deploy, systemd units). The server runs `backend/src/main.js`; run it locally from `backend/` with `npm start`. Auto-deploy finds `setup.sh` in `infra/` and still in `deploy/` for older commits, so rollbacks across the move keep working. The README now explains the product, the layout, running, configuration and deploying.
 - `infra`: `deploy/autodeploy.sh` takes `APP_DIR` and `STATE_DIR` from the environment.
 - `ui`: Design polish: plain Ukrainian punctuation instead of dashes, arrows and dot-joined strings; no emoji in the interface; no toast for what you already see on screen; a Ukrainian file picker; the phone menu on one row; Edit before Delete on the exam; one filled button per settings screen; the progress bar animates by transform.
