@@ -450,3 +450,24 @@ test('ai: explanations come with generated questions and on demand for the rest,
   assert.equal(byPrompt((await call('GET', `/api/exams/${exam.id}/test`)).data.questions).Own, 'Now y.');
 
 });
+
+test('ai: deadlines from a message, dated from when it was sent, with the answer cleaned up', async () => {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: JSON.stringify({ deadlines: [
+      { title: '  Есе   з етики ', course: 'Етика', url: 'https://learn.example/a/7', date: '2026-11-20', time: '23:59' },
+      { title: 'Тест', course: '', url: 'not a link', date: '20.11', time: 'вечір' },
+      { title: '', course: '', url: '', date: '2026-11-21', time: '' },
+    ] }) }] }] });
+  };
+  const ai = createAi({ provider: 'gemini', apiKey: 'k', fetchImpl });
+  const found = await ai.extractDeadlines({ text: 'Есе до п’ятниці', sentAt: Date.UTC(2026, 10, 14, 12, 0) });
+  assert.deepEqual(found, [
+    { title: 'Есе з етики', course: 'Етика', url: 'https://learn.example/a/7', date: '2026-11-20', time: '23:59' },
+    { title: 'Тест', course: '', url: '', date: '', time: '' },
+  ], 'bad links and dates are dropped, never guessed; a deadline without a title is skipped');
+  assert.match(requests[0].input.at(-1).text, /^Message sent: Saturday, 2026-11-14 14:00 \(Kyiv time\)\n\nMessage:\nЕсе до п’ятниці/);
+  assert.match(requests[0].system_instruction, /Never invent a date/);
+  assert.deepEqual(requests[0].response_format.schema.required, ['deadlines']);
+});

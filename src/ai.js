@@ -143,6 +143,35 @@ export function aiConfigFromEnv(env) {
 const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","options":["…","…","…"],"answer_index":0,"explanation":"…",'
   + '"material_id":1,"slide":3,"quote":"…"}]}';
 
+// Deadlines in a message a student forwards to the bot (usually from a course chat).
+const EXTRACT_SPEC = {
+  system: `You read a message a university student got, usually forwarded from a course chat, and list the deadlines in it: work to hand in, tests, exams, registrations.
+For each one give:
+- title: short, what has to be done, in the language of the message;
+- course: the course if the message names it, else "";
+- url: a link from the message that belongs to it, else "";
+- date: "YYYY-MM-DD";
+- time: "HH:MM" (24-hour), or "" when the message gives no time.
+Count words like "tomorrow", "до п'ятниці", "next Monday" from the moment the message was sent, given below; a date without a year is the next such date after that moment.
+When the message names a deadline but no day for it, still list it, with date "". Never invent a date or a time.
+When there is no deadline in the message, return an empty list.`,
+  schema: {
+    type: 'object', additionalProperties: false, required: ['deadlines'],
+    properties: {
+      deadlines: {
+        type: 'array',
+        items: {
+          type: 'object', additionalProperties: false, required: ['title', 'course', 'url', 'date', 'time'],
+          properties: {
+            title: { type: 'string' }, course: { type: 'string' }, url: { type: 'string' }, date: { type: 'string' }, time: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+  example: '{"deadlines":[{"title":"Есе з етики","course":"Етика","url":"","date":"2026-11-21","time":"23:59"}]}',
+};
+
 // Writing a question set vs. explaining one existing question: what each request asks for and gets back.
 const QUESTIONS_SPEC = { system: SYSTEM, schema: SCHEMA, example: JSON_EXAMPLE };
 const EXPLAIN_SPEC = {
@@ -315,5 +344,30 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     return explanation;
   }
 
-  return { enabled: Boolean(apiKey), provider, model, label, generateQuestions, explainQuestion };
+  // text: the message; sentAt: when it was first sent (relative dates count from it), in ms.
+  // Returns up to 5 [{ title, course, url, date, time }] with date/time in Kyiv wall-clock form ('' when unknown).
+  async function extractDeadlines({ text, sentAt }) {
+    if (!apiKey) throw new HttpError(503, 'AI на цьому сервері не налаштований');
+    const when = new Date(sentAt);
+    const weekday = when.toLocaleDateString('en-GB', { timeZone: 'Europe/Kyiv', weekday: 'long' });
+    const stamp = when.toLocaleString('sv-SE', { timeZone: 'Europe/Kyiv' }).slice(0, 16);
+    const task = `Message sent: ${weekday}, ${stamp} (Kyiv time)\n\nMessage:\n${String(text).slice(0, 4000)}`;
+    const reply = await ask[provider]([], task, EXTRACT_SPEC);
+    let parsed;
+    try {
+      parsed = JSON.parse(reply);
+    } catch {
+      throw new HttpError(502, `${label} повернув щось незрозуміле. Спробуйте ще раз.`);
+    }
+    const clean = (v, max) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
+    return (Array.isArray(parsed?.deadlines) ? parsed.deadlines : []).map((d) => ({
+      title: clean(d?.title, 200),
+      course: clean(d?.course, 100),
+      url: /^https?:\/\/\S+$/i.test(clean(d?.url, 2000)) ? clean(d?.url, 2000) : '',
+      date: /^\d{4}-\d{2}-\d{2}$/.test(clean(d?.date, 10)) ? clean(d?.date, 10) : '',
+      time: /^\d{1,2}:\d{2}$/.test(clean(d?.time, 5)) ? clean(d?.time, 5) : '',
+    })).filter((d) => d.title).slice(0, 5);
+  }
+
+  return { enabled: Boolean(apiKey), provider, model, label, generateQuestions, explainQuestion, extractDeadlines };
 }

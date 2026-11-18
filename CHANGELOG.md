@@ -29,6 +29,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `api`: Forward the Telegram bot a message with a deadline: the AI reads it and the bot offers "add for me", "add for my group" or "cancel". Telegram updates are no longer handled one after another, so a slow AI call does not hold up other users.
 - `ui`: "Why" after a wrong answer: AI questions come with an explanation; for the rest the AI writes one on the first mistake and it is kept (100 a day per user). Questions written by hand can carry their own explanation.
 - `ui`: Guest page: what Dueboard does in three lines and a link to the Telegram bot, next to the sign-in form.
 - `ui`: New exam: the Course field suggests the full names of your Moodle courses, and fills itself from the exam name (e.g. «Матаналіз», «ООП», «АСД»); you can still type anything.

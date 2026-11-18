@@ -804,7 +804,7 @@ async function showSettings(seq) {
       tgBox.replaceChildren(
         h('p', {}, h('span', { class: 'status-ok' }, 'Прив’язано'), ' Бот нагадує про кожен дедлайн, а зранку надсилає дайджест: що здавати цього тижня і що вчити сьогодні.'),
         reminderChoice(),
-        h('p', { class: 'muted' }, 'Команди бота: /deadlines показує дедлайни, /digest вмикає чи вимикає дайджест, /stop відв’язує чат.'),
+        h('p', { class: 'muted' }, 'Перешліть боту повідомлення з дедлайном (наприклад, з чату групи), і він запропонує додати його на дошку. Команди бота: /deadlines показує дедлайни, /digest вмикає чи вимикає дайджест, /stop відв’язує чат.'),
         h('button', {
           type: 'button', class: 'secondary',
           onclick: async () => { if (await act(() => api('DELETE', '/api/telegram'))) render(); },

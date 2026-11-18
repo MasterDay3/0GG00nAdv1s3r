@@ -33,7 +33,37 @@ export function localParts(ms, timeZone = TIME_ZONE) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
 }
 
+// Kyiv wall-clock date and time ('YYYY-MM-DD', 'HH:MM') to a timestamp, across summer/winter time; NaN for a date
+// that does not exist (2026-02-30).
+export function kyivToMs(date, time = '23:59', timeZone = TIME_ZONE) {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+  const t = /^(\d{1,2}):(\d{2})$/.exec(time || '');
+  if (!d || !t || Number(t[1]) > 23 || Number(t[2]) > 59) return NaN;
+  const wall = Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]));
+  // Date.UTC rolls 30 February over into March: that is not the date the message meant.
+  if (new Date(wall).getUTCMonth() !== Number(d[2]) - 1 || new Date(wall).getUTCDate() !== Number(d[3])) return NaN;
+  const wallOf = (ms) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute));
+  };
+  let ms = wall;
+  for (let i = 0; i < 2; i++) ms = wall - (wallOf(ms) - ms);
+  return wallOf(ms) === wall ? ms : NaN;
+}
+
 const clip = (s, max) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+// A deadline the bot found in a forwarded message, waiting for "add" or "cancel".
+export function draftText(draft, now) {
+  const course = draft.course ? `, курс ${clip(draft.course, 60)}` : '';
+  const past = draft.due_at <= now ? '\n⚠️ Ця дата вже минула.' : '';
+  const url = draft.url ? `\n${draft.url}` : '';
+  return `📌 Знайшов дедлайн:\n${clip(draft.title, 200)}${course}\n${formatDue(draft.due_at)}${url}${past}`;
+}
+
+export const FORWARD_HINT = 'Перешліть мені повідомлення з дедлайном (або напишіть, наприклад, «лаба з ООП до 25.11 18:00»), і я додам його на дошку.';
 
 export function itemLine(item, now) {
   const course = item.course ? `[${clip(item.course, 60)}] ` : '';
@@ -97,12 +127,12 @@ function remindersSentence(kinds) {
 const DIGEST_SENTENCE = `О ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня є дедлайни або план підготовки до екзамену.`;
 
 export function linkedText(username, kinds) {
-  return `Чат прив’язано до Dueboard як ${username}. ${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${commandList()}`;
+  return `Чат прив’язано до Dueboard як ${username}. ${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${FORWARD_HINT}\n\n${commandList()}`;
 }
 
 export function helpText(linked, kinds = []) {
   if (!linked) return `Привіт! Я бот Dueboard. ${NOT_LINKED}`;
-  return `${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${commandList()}`;
+  return `${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${FORWARD_HINT}\n\n${commandList()}`;
 }
 
 export function digestOffText(kinds) {

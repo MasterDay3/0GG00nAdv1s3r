@@ -132,6 +132,17 @@ export function openDb(path = ':memory:') {
   if (!questionColumns.includes('explanation')) db.exec('ALTER TABLE questions ADD COLUMN explanation TEXT');
   // AI explanations asked for, per user, for a daily limit.
   db.exec('CREATE TABLE IF NOT EXISTS ai_explains (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)');
+  // Messages read for deadlines in Telegram, per user, for a daily limit; and the deadlines found, until added or cancelled.
+  db.exec('CREATE TABLE IF NOT EXISTS ai_parses (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)');
+  db.exec(`CREATE TABLE IF NOT EXISTS tg_drafts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  course TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  due_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+)`);
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).

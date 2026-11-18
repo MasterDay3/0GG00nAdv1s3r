@@ -4,7 +4,7 @@ import { urgency, HOUR, DAY } from '../src/urgency.js';
 import { dueReminders, parseReminders, supersededBy } from '../src/reminders.js';
 import { buildPlan, addDays, daysBetween } from '../src/plan.js';
 import { scoreDiagnostic } from '../src/diagnostic.js';
-import { formatDue, localParts, digestText } from '../src/bot.js';
+import { formatDue, localParts, digestText, kyivToMs } from '../src/bot.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 
@@ -127,4 +127,13 @@ test('reminders: the user picks the times; only the tightest window fires', () =
   assert.deepEqual(parseReminders(''), []);
   assert.deepEqual(parseReminders('3h,bogus,1d'), ['3h', '1d']);
   assert.deepEqual(supersededBy('3h'), ['1d', '3d']);
+});
+
+test('bot: Kyiv wall time to a timestamp, in winter and summer, rejecting dates that do not exist', () => {
+  assert.equal(kyivToMs('2026-11-21', '23:59'), Date.UTC(2026, 10, 21, 21, 59));
+  assert.equal(kyivToMs('2026-07-01', '12:00'), Date.UTC(2026, 6, 1, 9, 0));
+  assert.equal(kyivToMs('2026-03-29', '04:30'), Date.UTC(2026, 2, 29, 1, 30), 'the morning summer time starts');
+  assert.ok(Number.isNaN(kyivToMs('2026-02-30', '10:00')));
+  assert.ok(Number.isNaN(kyivToMs('2026-11-21', '25:00')));
+  assert.ok(Number.isNaN(kyivToMs('', '10:00')));
 });

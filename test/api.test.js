@@ -274,8 +274,12 @@ test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) =>
   await tg(app, 7, '/digest');
   assert.match(sent.at(-1).text, /дайджест увімкнено/);
 
-  await tg(app, 7, 'hello');
+  await tg(app, 7, '/help');
   assert.match(sent.at(-1).text, /\/deadlines/);
+  assert.match(sent.at(-1).text, /Перешліть мені повідомлення з дедлайном/);
+  // Plain text is read for deadlines; without AI on the server the bot says so.
+  await tg(app, 7, 'hello');
+  assert.match(sent.at(-1).text, /AI на сервері не налаштований/);
 
   const before = sent.length;
   await tg(app, -100500, '/deadlines', 'group');
@@ -321,6 +325,88 @@ test('telegram: bot texts name the reminders the user picked, or say they are of
   assert.match(sent.at(-1).text, /Нагадування про дедлайни вимкнені/);
   await tg(app, 7, '/digest');
   assert.doesNotMatch(sent.at(-1).text, /приходитимуть/);
+});
+
+test('telegram: a forwarded message becomes a deadline after a tap, for me or my group', async (t) => {
+  const asked = [];
+  const ai = {
+    enabled: true,
+    extractDeadlines: async ({ text, sentAt }) => {
+      asked.push({ text, sentAt });
+      if (/нічого/.test(text)) return [];
+      if (/без дати/.test(text)) return [{ title: 'Реферат', course: '', url: '', date: '', time: '' }];
+      return [
+        { title: 'Есе з етики', course: 'Етика', url: 'https://learn.example/a/7', date: '2026-11-20', time: '23:59' },
+        { title: 'Тест з ООП', course: 'ООП', url: '', date: '2026-11-25', time: '' },
+      ];
+    },
+  };
+  const { app, base, sent, close } = await start({ ai });
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  const maryan = await signedUp(base, 'maryan');
+  const { code } = (await mykola('POST', '/api/group', { name: 'CS-2' })).data;
+  await maryan('POST', '/api/group/join', { code });
+  await linkTelegram(app, mykola, 1);
+  await linkTelegram(app, maryan, 2);
+  sent.length = 0;
+
+  // Relative dates count from when the message was first sent.
+  const forwardedAt = Math.floor((NOW - 2 * DAY) / 1000);
+  await app.handleTelegramUpdate({ message: {
+    chat: { id: 1, type: 'private' }, date: Math.floor(NOW / 1000), forward_origin: { type: 'user', date: forwardedAt },
+    text: 'Есе з етики до п’ятниці 23:59, а тест з ООП 25.11',
+  } });
+  assert.equal(asked[0].sentAt, forwardedAt * 1000);
+  const [essay, test2] = sent;
+  assert.match(essay.text, /Знайшов дедлайн:\nЕсе з етики, курс Етика\nпт, 20 лист\., 23:59\nhttps:\/\/learn\.example\/a\/7/);
+  assert.match(test2.text, /Тест з ООП, курс ООП\nср, 25 лист\., 23:59/, 'no time means the end of the day');
+  const labels = essay.buttons.flat().map((b) => b.text);
+  assert.deepEqual(labels, ['✅ Додати собі', '👥 Додати групі', '✖️ Скасувати']);
+  const press = (data, chatId = 1) => app.handleTelegramUpdate({
+    callback_query: { id: `q-${data}`, data, message: { message_id: 50, chat: { id: chatId }, text: 'Знайшов дедлайн' } },
+  });
+
+  sent.length = 0;
+  await press(essay.buttons[0][0].data); // for me
+  await press(essay.buttons[0][0].data); // double tap
+  assert.deepEqual(sent.filter((m) => m.answer).map((m) => m.text), ['✅ Додано на вашу дошку', 'Цей дедлайн уже оброблено.']);
+  assert.match(sent.find((m) => m.edited).text, /✅ Додано на вашу дошку$/);
+  const board = (await mykola('GET', '/api/deadlines')).data.items;
+  const added = board.find((i) => i.title === 'Есе з етики');
+  assert.equal(added.source, 'personal');
+  assert.equal(added.dueAt, Date.UTC(2026, 10, 20, 21, 59), '23:59 Kyiv is 21:59 UTC in November');
+  assert.equal(added.url, 'https://learn.example/a/7');
+
+  sent.length = 0;
+  await press(test2.buttons[0][1].data); // for the group
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok((await maryan('GET', '/api/deadlines')).data.items.some((i) => i.title === 'Тест з ООП' && i.source === 'group'));
+  assert.ok(sent.some((m) => m.chatId === '2' && /додає дедлайн для вашої групи/.test(m.text)), 'the group hears about it');
+  assert.equal(await press(test2.buttons[1][0].data).then(() => sent.at(-1).text), 'Цей дедлайн уже оброблено.');
+
+  // Someone else cannot press my buttons.
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'ще одне есе' } });
+  const third = sent.at(-1).buttons[0][0].data;
+  sent.length = 0;
+  await press(third, 2);
+  assert.equal(sent.at(-1).text, 'Цей дедлайн уже оброблено.');
+
+  // No date: ask for it. No deadline: say so. Cancel: nothing added.
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'реферат без дати' } });
+  assert.match(sent.at(-1).text, /Бачу «Реферат», але не бачу дати/);
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'тут нічого' } });
+  assert.match(sent.at(-1).text, /Не знайшов тут дедлайну/);
+  const before = (await mykola('GET', '/api/deadlines')).data.items.length;
+  await press(third.replace(/:me$/, ':no'));
+  assert.match(sent.find((m) => m.edited)?.text || '', /Скасовано/);
+  assert.equal((await mykola('GET', '/api/deadlines')).data.items.length, before);
+
+  // Group chats and unlinked chats are not read.
+  const calls = asked.length;
+  await app.handleTelegramUpdate({ message: { chat: { id: -5, type: 'group' }, date: 1, text: 'есе до п’ятниці' } });
+  await app.handleTelegramUpdate({ message: { chat: { id: 99, type: 'private' }, date: 1, text: 'есе до п’ятниці' } });
+  assert.equal(asked.length, calls);
 });
 
 test('telegram: group deadline is announced to the other linked members', async (t) => {

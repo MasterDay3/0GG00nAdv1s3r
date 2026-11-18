@@ -38,7 +38,8 @@ async function pollTelegram() {
     try {
       for (const update of await telegram.getUpdates(offset)) {
         offset = update.update_id + 1;
-        await app.handleTelegramUpdate(update);
+        // Not awaited: reading a message with the AI takes seconds, and the bot must keep answering everyone else.
+        app.handleTelegramUpdate(update).catch((err) => console.error('Telegram update failed:', err));
       }
     } catch (err) {
       console.error('Telegram polling failed:', err.message);

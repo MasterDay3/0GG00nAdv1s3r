@@ -24,12 +24,13 @@ export function createTelegram({ token, fetchImpl = globalThis.fetch, log = cons
       cachedName ??= (await call('getMe', {})).username;
       return cachedName;
     },
-    // doneKey adds a "✅ Done" button that marks that deadline as done.
-    async send(chatId, text, { doneKey } = {}) {
+    // doneKey adds a "✅ Done" button that marks that deadline as done; buttons: rows of [{ text, data }].
+    async send(chatId, text, { doneKey, buttons } = {}) {
       if (!token) return log(`[telegram off] to ${chatId}: ${text}`);
       // Telegram refuses messages over 4096 characters; a long list is cut instead of failing every minute.
       if (text.length > 4000) text = `${text.slice(0, 3990)}\n…`;
-      const markup = doneKey ? { reply_markup: { inline_keyboard: [[{ text: '✅ Виконано', callback_data: `done:${doneKey}` }]] } } : {};
+      const rows = buttons || (doneKey ? [[{ text: '✅ Виконано', data: `done:${doneKey}` }]] : null);
+      const markup = rows ? { reply_markup: { inline_keyboard: rows.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } } : {};
       await call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true, ...markup });
     },
     async editMessage(chatId, messageId, text) {

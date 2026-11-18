@@ -15,6 +15,7 @@ import { buildCalendar } from './ics-export.js';
 import { safeFetch } from './safe-fetch.js';
 import {
   NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText, digestOffText,
+  kyivToMs, draftText, FORWARD_HINT,
 } from './bot.js';
 
 const MAX_JSON = 64 * 1024;
@@ -25,6 +26,7 @@ const MAX_BIG_BODIES = 4;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
 const AI_EXPLAINS_PER_DAY = 100;
+const AI_PARSES_PER_DAY = 50;
 const RESET_TTL = 15 * 60 * 1000;
 const RESET_TRIES = 5;
 const RESET_FAILS_PER_DAY = 10;
@@ -649,9 +651,8 @@ export function createApp({
     };
   }
 
-  route('POST', '/api/deadlines', ({ user, body }) => {
-    const { title, course, dueAt, url } = deadlineFields(body);
-    const shared = body.shared === true;
+  // A deadline the user adds, for themselves or (shared) for their whole group; from the site or the bot.
+  function addDeadline(user, { title, course, url, dueAt }, shared) {
     if (shared && !user.group_id) throw new HttpError(400, 'Щоб ділитися дедлайнами, приєднайтеся до групи');
     const { lastInsertRowid } = run(
       `INSERT INTO deadlines (owner_user_id, group_id, created_by, source, course, title, url, due_at)
@@ -663,7 +664,9 @@ export function createApp({
     // Not awaited: the response should not wait for Telegram.
     if (shared) notifyGroup(user, { source: 'group', course, title, url, dueAt }).catch((err) => console.error(err));
     return { id, key: `d${id}` };
-  });
+  }
+
+  route('POST', '/api/deadlines', ({ user, body }) => addDeadline(user, deadlineFields(body), body.shared === true));
 
   // Only the author edits a deadline they added; Moodle ones come from Moodle and would be overwritten by the next sync.
   route('PUT', '/api/deadlines/:id', ({ user, params, body }) => {
@@ -1200,9 +1203,29 @@ export function createApp({
   }
 
   // The "✅ Done" button under a reminder.
+  // "Add for me" / "Add for my group" / "Cancel" under a deadline the bot found in a message.
+  async function handleDraftButton(query, user, chatId, draftId, action) {
+    const draft = user && one('SELECT * FROM tg_drafts WHERE id = ? AND user_id = ?', draftId, user.id);
+    if (!user) return telegram.answerButton(query.id, 'Цей чат більше не прив’язаний до Dueboard.');
+    if (!draft) return telegram.answerButton(query.id, 'Цей дедлайн уже оброблено.');
+    if (action === 'group' && !user.group_id) return telegram.answerButton(query.id, 'Ви вже не в групі. Додайте дедлайн собі.');
+    // Delete first: a double tap must not add the deadline twice.
+    if (!run('DELETE FROM tg_drafts WHERE id = ?', draft.id).changes) return telegram.answerButton(query.id, 'Цей дедлайн уже оброблено.');
+    let note = '✖️ Скасовано';
+    if (action !== 'no') {
+      addDeadline(user, { title: draft.title, course: draft.course, url: draft.url, dueAt: draft.due_at }, action === 'group');
+      note = action === 'group' ? '👥 Додано для всієї групи' : '✅ Додано на вашу дошку';
+    }
+    await telegram.answerButton(query.id, note);
+    await telegram.editMessage(String(chatId), query.message.message_id, `${query.message.text}\n\n${note}`)
+      .catch((err) => console.error('Telegram edit failed:', err.message));
+  }
+
   async function handleTelegramButton(query) {
     const chatId = query.message?.chat?.id;
     const user = chatId != null && one('SELECT * FROM users WHERE tg_chat_id = ?', String(chatId));
+    const draft = /^draft:(\d+):(me|group|no)$/.exec(query.data || '');
+    if (draft) return handleDraftButton(query, user, chatId, Number(draft[1]), draft[2]);
     const key = /^done:(d\d+)$/.exec(query.data || '')?.[1];
     let answer = 'Цього дедлайну вже немає на вашій дошці.';
     if (!user) answer = 'Цей чат більше не прив’язаний до Dueboard.';
@@ -1221,12 +1244,14 @@ export function createApp({
   async function handleTelegramUpdate(update) {
     if (update.callback_query) return handleTelegramButton(update.callback_query);
     const message = update.message;
-    if (!message?.chat || typeof message.text !== 'string') return;
+    // A forwarded photo or file carries its words in the caption.
+    const body = typeof message?.text === 'string' ? message.text : message?.caption;
+    if (!message?.chat || typeof body !== 'string') return;
     // Deadlines are personal: only answer in a private chat with the bot, never in group chats.
     if (message.chat.type && message.chat.type !== 'private') return;
     const chatId = String(message.chat.id);
     const reply = (text) => telegram.send(chatId, text);
-    const [word = '', arg = ''] = message.text.trim().split(/\s+/);
+    const [word = '', arg = ''] = body.trim().split(/\s+/);
     const command = word.toLowerCase().replace(/@\w+$/, '');
     const user = one('SELECT * FROM users WHERE tg_chat_id = ?', chatId);
 
@@ -1254,7 +1279,45 @@ export function createApp({
       run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
       return reply('Чат відв’язано, повідомлень більше не буде. Під’єднатися знову можна в Dueboard → Налаштування.');
     }
+    if (user && !command.startsWith('/')) return draftsFromMessage(user, chatId, message, body);
     return reply(helpText(Boolean(user), user ? parseReminders(user.tg_remind) : []));
+  }
+
+  // A message the student forwards (or types): the AI finds the deadlines in it, and each comes back with buttons.
+  async function draftsFromMessage(user, chatId, message, text) {
+    const reply = (t, options) => telegram.send(chatId, t, options);
+    if (!ai.enabled) return reply('Розпізнавати дедлайни з повідомлень зараз не вийде: AI на сервері не налаштований. Додайте дедлайн на сайті.');
+    const { used } = one('SELECT COUNT(*) AS used FROM ai_parses WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
+    if (used >= AI_PARSES_PER_DAY) return reply(`Розібрати можна ${AI_PARSES_PER_DAY} повідомлень на день. Спробуйте завтра або додайте дедлайн на сайті.`);
+    run('INSERT INTO ai_parses (user_id, created_at) VALUES (?, ?)', user.id, now());
+    // Relative dates ("до п'ятниці") count from when the message was first sent, not when it was forwarded.
+    const sentSeconds = message.forward_origin?.date ?? message.forward_date ?? message.date;
+    const sentAt = Number.isFinite(sentSeconds) ? sentSeconds * 1000 : now();
+    let found;
+    try {
+      found = await ai.extractDeadlines({ text, sentAt });
+    } catch (err) {
+      if (!(err instanceof HttpError)) console.error('Deadline extraction failed:', err);
+      return reply('Не вдалося розібрати повідомлення. Спробуйте ще раз за хвилину.');
+    }
+    if (!found.length) return reply(`Не знайшов тут дедлайну. ${FORWARD_HINT}`);
+    for (const d of found) {
+      const dueAt = d.date ? kyivToMs(d.date, d.time || '23:59') : NaN;
+      if (!Number.isFinite(dueAt)) {
+        await reply(`Бачу «${d.title}», але не бачу дати. Напишіть, до коли, наприклад: «${d.title} до 25.11 18:00».`);
+        continue;
+      }
+      const { lastInsertRowid } = run(
+        'INSERT INTO tg_drafts (user_id, title, course, url, due_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        user.id, d.title, d.course, d.url, dueAt, now(),
+      );
+      const id = Number(lastInsertRowid);
+      const add = [{ text: '✅ Додати собі', data: `draft:${id}:me` }];
+      if (user.group_id) add.push({ text: '👥 Додати групі', data: `draft:${id}:group` });
+      await reply(draftText({ title: d.title, course: d.course, url: d.url, due_at: dueAt }, now()), {
+        buttons: [add, [{ text: '✖️ Скасувати', data: `draft:${id}:no` }]],
+      });
+    }
   }
 
   async function runReminders() {
@@ -1316,6 +1379,10 @@ export function createApp({
     for (const { id } of all('SELECT id FROM deadlines WHERE removed_at IS NOT NULL AND removed_at <= ?', t - 60 * DAY)) forgetDeadline(id);
     run('DELETE FROM sessions WHERE expires_at <= ?', t);
     run('DELETE FROM ai_runs WHERE created_at <= ?', t - DAY);
+    run('DELETE FROM ai_explains WHERE created_at <= ?', t - DAY);
+    run('DELETE FROM ai_parses WHERE created_at <= ?', t - DAY);
+    // A found deadline nobody added in two days is not coming.
+    run('DELETE FROM tg_drafts WHERE created_at <= ?', t - 2 * DAY);
     run('UPDATE users SET reset_hash = NULL, reset_expires = NULL, reset_tries = 0 WHERE reset_expires <= ?', t);
     // Reminder marks for deadlines and exams that are gone or a week past: no reminder can come for them any more.
     run(`DELETE FROM reminders_sent WHERE
