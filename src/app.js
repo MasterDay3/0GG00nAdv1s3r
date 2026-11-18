@@ -24,6 +24,15 @@ const MAX_UPLOAD_BODY = Math.ceil(MAX_FILE * 4 / 3) + 4096;
 const MAX_FEED = 5 * 1024 * 1024;
 const MAX_BIG_BODIES = 4;
 const SESSION_TTL = 30 * DAY;
+// Dueboard Prep: the whole exam prep section, 149 грн for 30 days. Payments are a demo with test cards only.
+const PREMIUM = { price: 149, days: 30 };
+const PAID_API = /^\/api\/(exams|topics|questions|problems|materials)(\/|$)/;
+// The bank's answer for each test card. Real card numbers never reach the server: the page sends only which test card it was.
+const TEST_CARDS = {
+  success: { last4: '4242', ok: true },
+  declined: { last4: '0002', ok: false, reason: 'Банк відхилив оплату. Спробуйте іншу картку.' },
+  funds: { last4: '9995', ok: false, reason: 'Недостатньо коштів на картці.' },
+};
 const AI_RUNS_PER_DAY = 10;
 const AI_EXPLAINS_PER_DAY = 100;
 const AI_PARSES_PER_DAY = 50;
@@ -124,7 +133,7 @@ function normalizeFeedUrl(value) {
 // storageLimit: bytes of uploaded files one user may keep, across all their exams.
 export function createApp({
   db, now = () => Date.now(), fetchImpl = safeFetch, telegram, secureCookies = false, ai = createAi(),
-  storageLimit = 100 * 1024 * 1024,
+  storageLimit = 100 * 1024 * 1024, paywall = false,
 }) {
   // Behind HTTPS the session cookie must never travel over plain HTTP.
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
@@ -205,8 +214,50 @@ export function createApp({
       },
       extension: { connected: Boolean(user.ext_key_hash) },
       calendarFeed: Boolean(user.cal_token_hash),
+      premium: { required: paywall, active: premiumActive(user), until: user.premium_until || null, ...PREMIUM },
     };
   }
+
+  const premiumActive = (user) => Boolean(user.premium_until && user.premium_until > now());
+
+  // ---------- routes: Dueboard Prep (demo payments) ----------
+
+  const paymentView = (p) => ({
+    id: p.id, orderRef: p.order_ref, amount: p.amount / 100, status: p.status, cardLast4: p.card_last4,
+    reason: p.reason, createdAt: p.created_at, paidAt: p.paid_at, activeUntil: p.active_until,
+  });
+
+  route('GET', '/api/payments', ({ user }) =>
+    all('SELECT * FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 50', user.id).map(paymentView));
+
+  // An order for one package. Unpaid orders older than a day are dropped, so the list stays short.
+  route('POST', '/api/payments', ({ user }) => {
+    run("DELETE FROM payments WHERE user_id = ? AND status = 'pending' AND created_at < ?", user.id, now() - DAY);
+    const orderRef = `DB-${new Date(now()).toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`;
+    const { lastInsertRowid } = run(
+      "INSERT INTO payments (user_id, order_ref, amount, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+      user.id, orderRef, PREMIUM.price * 100, now(),
+    );
+    return paymentView(one('SELECT * FROM payments WHERE id = ?', lastInsertRowid));
+  });
+
+  // The demo "bank": the page says which test card was used; a paid order adds 30 days (on top of time left, if any).
+  route('POST', '/api/payments/:id/pay', ({ user, params, body }) => {
+    const payment = one('SELECT * FROM payments WHERE id = ? AND user_id = ?', params.id, user.id);
+    if (!payment) throw new HttpError(404, 'Замовлення не знайдено');
+    if (payment.status !== 'pending') throw new HttpError(409, 'Це замовлення вже оброблено. Почніть нове.');
+    const card = Object.hasOwn(TEST_CARDS, body.card) ? TEST_CARDS[body.card] : null;
+    if (!card) throw new HttpError(400, 'Це демо-оплата: приймаються лише тестові картки.');
+    if (!card.ok) {
+      run("UPDATE payments SET status = 'declined', card_last4 = ?, reason = ? WHERE id = ?", card.last4, card.reason, payment.id);
+    } else {
+      const fresh = one('SELECT premium_until FROM users WHERE id = ?', user.id);
+      const until = Math.max(now(), fresh.premium_until || 0) + PREMIUM.days * DAY;
+      run('UPDATE users SET premium_until = ? WHERE id = ?', until, user.id);
+      run("UPDATE payments SET status = 'paid', card_last4 = ?, paid_at = ?, active_until = ? WHERE id = ?", card.last4, now(), until, payment.id);
+    }
+    return paymentView(one('SELECT * FROM payments WHERE id = ?', payment.id));
+  });
 
   // ---------- board ----------
 
@@ -1158,6 +1209,9 @@ export function createApp({
       );
       const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
       if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Розширення не під’єднане' : 'Увійдіть у свій акаунт');
+      if (paywall && match.auth === true && PAID_API.test(pathname) && !premiumActive(user)) {
+        throw new HttpError(402, `Підготовка до екзаменів входить у Dueboard Prep: ${PREMIUM.price} грн на ${PREMIUM.days} днів.`);
+      }
       const wantsBody = ['POST', 'PUT'].includes(req.method) || match.withBody;
       // A big body (an upload, a calendar) is held in memory several times over: only a few at once.
       const big = wantsBody && match.limit > MAX_JSON;

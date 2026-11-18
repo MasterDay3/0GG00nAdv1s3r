@@ -18,6 +18,8 @@ const ai = createAi(aiConfigFromEnv(process.env));
 const storageMb = Number(process.env.STORAGE_MB_PER_USER) || 100;
 const app = createApp({
   db: openDb(DB_PATH), telegram, ai, secureCookies: process.env.COOKIE_SECURE === '1', storageLimit: storageMb * 1024 * 1024,
+  // Exam prep is the paid package (demo payments); PAYWALL=0 opens it to everyone.
+  paywall: process.env.PAYWALL !== '0',
 });
 
 createServer(app.handler).listen(PORT, HOST, () => {

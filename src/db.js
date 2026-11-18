@@ -143,6 +143,22 @@ export function openDb(path = ':memory:') {
   due_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 )`);
+  // Dueboard Prep (the paid package): active until this time.
+  if (!userColumns.includes('premium_until')) db.exec('ALTER TABLE users ADD COLUMN premium_until INTEGER');
+  // Demo payments: no real money and no real card numbers; only which test card was used and its last 4 digits.
+  db.exec(`
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  order_ref TEXT NOT NULL UNIQUE,
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'declined')),
+  card_last4 TEXT,
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  paid_at INTEGER,
+  active_until INTEGER
+);`);
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).
