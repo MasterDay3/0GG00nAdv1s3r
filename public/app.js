@@ -959,19 +959,80 @@ function accountCard() {
 
 // ---------- exam prep ----------
 
+// Words that say what kind of exam it is, not which course.
+const EXAM_WORDS = new Set(['екзамен', 'іспит', 'залік', 'підсумковий', 'підсумкова', 'проміжний', 'проміжна', 'фінальний', 'модуль',
+  'контрольна', 'тест', 'колоквіум', 'exam', 'final', 'midterm', 'test', 'quiz']);
+const SMALL_WORDS = new Set(['та', 'і', 'й', 'в', 'у', 'з', 'до', 'на', 'and', 'of', 'the', 'in']);
+const words = (s) => (s.toLowerCase().replace(/[ʼ'’`]/g, '').match(/[\p{L}\p{N}]+/gu) || []);
+
+// Does one word of the exam name point to this course? Handles "алгоритми", "матан"/"матаналіз" and "ООП".
+function wordMatchesCourse(word, raw, courseWords) {
+  const long = courseWords.filter((w) => w.length >= 3 && !SMALL_WORDS.has(w));
+  if (word.length >= 3 && long.some((w) => w.startsWith(word.slice(0, 5)) || word.startsWith(w.slice(0, 5)))) return true;
+  // Glued abbreviations: "матаналіз" = "мат" + "аналіз" from two words that follow each other.
+  for (let i = 3; i <= word.length - 3; i++) {
+    const [left, right] = [word.slice(0, i), word.slice(i)];
+    for (let k = 0; k < long.length - 1; k++) {
+      if (long[k].startsWith(left) && long[k + 1].startsWith(right.slice(0, 4))) return true;
+    }
+  }
+  // Capital-letter abbreviations: "ООП", "ТЙМС".
+  if (/^[\p{Lu}]{2,6}$/u.test(raw)) {
+    const initials = long.map((w) => w[0]).join('');
+    if (initials.startsWith(word)) return true;
+  }
+  return false;
+}
+
+// The full course name the exam title most likely belongs to, or '' when no single course stands out.
+function guessCourse(title, courses) {
+  const raws = (title.replace(/[ʼ'’`]/g, '').match(/[\p{L}\p{N}]+/gu) || []).filter((w) => !EXAM_WORDS.has(w.toLowerCase()));
+  if (!raws.length) return '';
+  const scored = courses.map((course) => {
+    const courseWords = words(course);
+    return { course, score: raws.filter((raw) => wordMatchesCourse(raw.toLowerCase(), raw, courseWords)).length };
+  }).filter((c) => c.score > 0).sort((a, b) => b.score - a.score);
+  if (!scored.length || scored[1]?.score === scored[0].score) return '';
+  return scored[0].course;
+}
+
+// Course input with the student's full course names as suggestions; fills itself from the exam name until the student types in it.
+function courseField(titleInput, courses, value = '') {
+  const id = `courses-${Math.random().toString(36).slice(2, 8)}`;
+  const input = h('input', { name: 'course', maxlength: 100, value, list: id, autocomplete: 'off', placeholder: courses.length ? 'почніть вводити або оберіть' : '' });
+  const hint = h('span', { class: 'muted small', hidden: true }, 'Підказано за назвою екзамену, можна змінити');
+  let guessed = value ? null : '';
+  titleInput.addEventListener('input', () => {
+    if (guessed === null || input.value !== guessed) return;
+    guessed = guessCourse(titleInput.value, courses);
+    input.value = guessed;
+    hint.hidden = !guessed;
+  });
+  input.addEventListener('input', () => { guessed = null; hint.hidden = true; });
+  return h('label', {}, 'Курс', input, h('datalist', { id }, courses.map((c) => h('option', { value: c }))), hint);
+}
+
+function themeField(value = '') {
+  return h('label', {}, 'Тема екзамену (необов’язково)',
+    h('textarea', { name: 'theme', maxlength: 1000, rows: 2, value, placeholder: 'напр. Ряди, визначені інтеграли, диференціальні рівняння' }),
+    h('span', { class: 'muted small' }, 'Що буде на екзамені. AI складатиме питання саме з цього.'));
+}
+
 async function showPrep(seq) {
-  const exams = await api('GET', '/api/exams');
+  const [exams, courses] = await Promise.all([api('GET', '/api/exams'), api('GET', '/api/courses')]);
+  const titleInput = h('input', { name: 'title', required: true, maxlength: 200, placeholder: 'напр. Матаналіз, підсумковий' });
   const form = h('form', {
     onsubmit: async (e) => {
       e.preventDefault();
       const f = formData(form);
-      const r = await act(() => api('POST', '/api/exams', { title: f.title, course: f.course, examAt: parseLocalInput(f.examAt) }));
+      const r = await act(() => api('POST', '/api/exams', { title: f.title, course: f.course, theme: f.theme, examAt: parseLocalInput(f.examAt) }));
       if (r) location.hash = `#/prep/${r.id}`;
     },
   },
   h('div', { class: 'row' },
-    h('label', { class: 'grow' }, 'Екзамен', h('input', { name: 'title', required: true, maxlength: 200, placeholder: 'напр. Матаналіз, підсумковий' })),
-    h('label', {}, 'Курс', h('input', { name: 'course', maxlength: 100 }))),
+    h('label', { class: 'grow' }, 'Екзамен', titleInput),
+    courseField(titleInput, courses)),
+  themeField(),
   h('div', { class: 'row' },
     h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true })),
     h('button', { type: 'submit', class: 'shrink' }, 'Додати екзамен')));
@@ -1279,7 +1340,7 @@ function planBlock(exam) {
 }
 
 async function showExam(id, seq) {
-  const exam = await api('GET', `/api/exams/${id}`);
+  const [exam, courses] = await Promise.all([api('GET', `/api/exams/${id}`), api('GET', '/api/courses')]);
   const reload = () => render();
   const questionCount = exam.topics.reduce((n, t) => n + t.questions.length, 0);
 
@@ -1301,20 +1362,25 @@ async function showExam(id, seq) {
         h('h1', {}, exam.title),
         h('div', { class: 'exam-meta' },
           h('time', { class: 'num', datetime: new Date(exam.examAt).toISOString() }, fmtDate(exam.examAt)),
-          h('span', { class: 'chip amber' }, relative(exam.examAt)))),
-      h('div', { class: 'tools' }, 
-        editButton(() => h('form', {
+          h('span', { class: 'chip amber' }, relative(exam.examAt))),
+        exam.theme ? h('p', { class: 'exam-theme pre' }, h('span', { class: 'muted' }, 'Тема: '), exam.theme) : null),
+      h('div', { class: 'tools' },
+        editButton(() => {
+        const titleInput = h('input', { name: 'title', required: true, maxlength: 200, value: exam.title });
+        return h('form', {
         class: 'edit-form grow',
         onsubmit: async (e) => {
           e.preventDefault();
           const f = formData(e.target);
-          if (await act(() => api('PUT', `/api/exams/${id}`, { title: f.title, course: f.course, examAt: parseLocalInput(f.examAt) }))) reload();
+          if (await act(() => api('PUT', `/api/exams/${id}`, { title: f.title, course: f.course, theme: f.theme, examAt: parseLocalInput(f.examAt) }))) reload();
         },
       },
       h('div', { class: 'row' },
-        h('label', { class: 'grow' }, 'Екзамен', h('input', { name: 'title', required: true, maxlength: 200, value: exam.title })),
-        h('label', {}, 'Курс', h('input', { name: 'course', maxlength: 100, value: exam.course }))),
-      h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true, value: localInputValue(exam.examAt) })),saveCancel(reload))),
+        h('label', { class: 'grow' }, 'Екзамен', titleInput),
+        courseField(titleInput, courses, exam.course)),
+      themeField(exam.theme),
+      h('label', {}, 'Дата й час', h('input', { name: 'examAt', type: 'datetime-local', required: true, value: localInputValue(exam.examAt) })),saveCancel(reload));
+        }),
         h('button', {
         type: 'button', class: 'danger',
         onclick: async () => {

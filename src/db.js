@@ -124,6 +124,9 @@ export function openDb(path = ':memory:') {
   if (!deadlineColumns.includes('removed_at')) db.exec('ALTER TABLE deadlines ADD COLUMN removed_at INTEGER');
   const attemptColumns = db.prepare('PRAGMA table_info(attempts)').all().map((c) => c.name);
   if (!attemptColumns.includes('wrong')) db.exec("ALTER TABLE attempts ADD COLUMN wrong TEXT NOT NULL DEFAULT '[]'");
+  // What the exam covers, in the student's words; the AI keeps its questions to it.
+  const examColumns = db.prepare('PRAGMA table_info(exams)').all().map((c) => c.name);
+  if (!examColumns.includes('theme')) db.exec("ALTER TABLE exams ADD COLUMN theme TEXT NOT NULL DEFAULT ''");
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).

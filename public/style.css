@@ -442,3 +442,4 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .file-pick:focus-within .file-button { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .file-chosen { min-width: 0; overflow-wrap: anywhere; }
 .field-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); margin-bottom: var(--space-2xs); }
+.exam-theme { margin-top: var(--space-xs); max-width: 60ch; }
