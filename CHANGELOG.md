@@ -24,6 +24,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `auth`: Limits on password guessing: 5 wrong passwords per account and address in 15 min, 30 per account in an hour, 100 logins and 20 sign-ups per address; the real address is read from Caddy's `X-Forwarded-For`.
 
 ### Changed
+- `infra`: `deploy/autodeploy.sh` takes `APP_DIR` and `STATE_DIR` from the environment.
 - `ui`: Design polish: plain Ukrainian punctuation instead of dashes, arrows and dot-joined strings; no emoji in the interface; no toast for what you already see on screen; a Ukrainian file picker; the phone menu on one row; Edit before Delete on the exam; one filled button per settings screen; the progress bar animates by transform.
 - `ui`: The whole interface, server messages, Telegram bot and Chrome extension are in Ukrainian; dates use the Ukrainian format. Fonts switched to IBM Plex Sans and Mono, which have Cyrillic.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
@@ -83,6 +84,10 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `api`: Gemini: a busy model falls back to the other Gemini model, each attempt waits up to 150 s instead of hanging for 5 minutes, and keys starting with `AQ.` are recognised as Gemini keys.
+- `api`: AI questions from files without slides (DOCX, TXT, MD) are kept instead of dropped.
+- `api`: The data export leaves out the Moodle calendar link, includes exam notes and ids, and downloads more safely.
+- `ui`: Guest page columns shrink with the screen instead of following the longest line.
 - `api`: Reading a forwarded message no longer leaves the chat silent for minutes: the bot answers "reading…" at once, the AI gets 30 s per model (1 min in all), and a timeout gets a clear message. Explanations use the same short timeout.
 - `api`: The bot's welcome, /help and /digest texts name the reminders the user actually picked (or say they are off) instead of always "3 days and 1 day".
 - `ui`: Course hints no longer depend on capital letters: the Course field suggests matches in any case, any apostrophe and anywhere in the name (its own list instead of the browser's, which in Safari matched only exact case from the start), and abbreviations like «асд» or «ооад» guess the course like «АСД».
