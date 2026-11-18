@@ -275,10 +275,27 @@ function showAuth() {
 
   const forgot = h('button', { type: 'button', class: 'link small', onclick: () => showReset(form.username.value) }, 'Забули пароль?');
 
-  setView(h('div', { class: 'auth' },
-    h('h1', {}, 'Dueboard'),
-    h('p', { class: 'tagline' }, 'Усі дедлайни курсів в одному списку і помічник для підготовки до екзамену.'),
-    h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot))));
+  // The Telegram button appears once the server says which bot it is.
+  const tgSlot = h('div', { class: 'landing-tg' });
+  api('GET', '/api/public').then(({ bot }) => {
+    if (!bot) return;
+    tgSlot.replaceChildren(h('a', {
+      class: 'button secondary', href: `https://t.me/${encodeURIComponent(bot)}`, target: '_blank', rel: 'noopener noreferrer',
+    }, `Бот у Telegram: @${bot}`));
+  }).catch(() => {});
+
+  setView(h('div', { class: 'landing' },
+    h('section', { class: 'landing-intro' },
+      h('img', { src: '/favicon.svg', alt: '', width: 72, height: 72, class: 'landing-logo' }),
+      h('h1', {}, 'Dueboard'),
+      h('p', { class: 'tagline' }, 'Усі дедлайни курсів в одному списку і помічник для підготовки до екзамену.'),
+      h('ul', { class: 'landing-points' },
+        h('li', {}, h('span', { 'aria-hidden': 'true' }, '📋'), 'Дедлайни з Moodle і з чатів групи разом'),
+        h('li', {}, h('span', { 'aria-hidden': 'true' }, '⏰'), 'Нагадування в Telegram, поки ще не пізно'),
+        h('li', {}, h('span', { 'aria-hidden': 'true' }, '🎯'), 'AI-тест з ваших слайдів показує слабкі теми')),
+      tgSlot),
+    h('div', { class: 'auth' },
+      h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot)))));
 }
 
 // Forgotten password: a code comes to the Telegram chat linked to the account.

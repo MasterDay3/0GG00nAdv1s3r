@@ -450,6 +450,11 @@ export function createApp({
 
   route('GET', '/api/me', ({ user }) => me(user));
 
+  // For the guest page: the Telegram bot to link to (null when the bot is off or Telegram does not answer).
+  route('GET', '/api/public', async () => ({
+    bot: telegram.enabled ? await telegram.botName().catch(() => null) : null,
+  }), { auth: false });
+
   // ---------- routes: account ----------
 
   // Checks the current password before a sensitive change; wrong guesses are limited like logins.

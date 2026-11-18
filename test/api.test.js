@@ -289,6 +289,18 @@ test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) =>
   assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
 });
 
+test('public: the guest page learns the bot name without logging in', async (t) => {
+  const on = await start();
+  t.after(on.close);
+  const res = await fetch(`${on.base}/api/public`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { bot: 'dueboard_test_bot' });
+
+  const off = await start({ telegram: { enabled: false, botName: async () => null, send: async () => {} } });
+  t.after(off.close);
+  assert.deepEqual(await (await fetch(`${off.base}/api/public`)).json(), { bot: null });
+});
+
 test('telegram: bot texts name the reminders the user picked, or say they are off', async (t) => {
   const { app, base, sent, close } = await start();
   t.after(close);
