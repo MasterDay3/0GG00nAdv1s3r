@@ -17,11 +17,20 @@ export function createTelegram({ token, fetchImpl = globalThis.fetch, log = cons
   }
 
   let cachedName = null;
+  let nameFailedAt = 0;
   return {
     enabled: Boolean(token),
     async botName() {
       if (!token) return null;
-      cachedName ??= (await call('getMe', {})).username;
+      if (cachedName) return cachedName;
+      // The guest and privacy pages ask on every visit: after a failure, wait 5 minutes before asking Telegram again.
+      if (nameFailedAt && Date.now() - nameFailedAt < 5 * 60 * 1000) return null;
+      try {
+        cachedName = (await call('getMe', {})).username;
+      } catch (err) {
+        nameFailedAt = Date.now();
+        throw err;
+      }
       return cachedName;
     },
     // doneKey adds a "✅ Done" button that marks that deadline as done; buttons: rows of [{ text, data }].

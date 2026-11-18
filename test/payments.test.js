@@ -54,11 +54,18 @@ test('paywall: exam prep needs Dueboard Prep, the board stays free', async (t) =
   assert.equal((await call('DELETE', '/api/exams/1')).status, 404);
 });
 
-test('payments: orders are limited to 20 an hour', async (t) => {
+test('payments: reopening the checkout continues the unpaid order; new orders are limited to 20 an hour', async (t) => {
   const { client, close } = await start();
   t.after(close);
   const call = await student(client);
-  for (let i = 0; i < 20; i++) assert.equal((await call('POST', '/api/payments', {})).status, 200);
+  const first = (await call('POST', '/api/payments', {})).data;
+  assert.equal((await call('POST', '/api/payments', {})).data.id, first.id, 'a reload does not start a second order');
+  await call('POST', `/api/payments/${first.id}/pay`, { card: 'declined' });
+  for (let i = 1; i < 20; i++) {
+    const order = (await call('POST', '/api/payments', {})).data;
+    assert.notEqual(order.id, first.id);
+    await call('POST', `/api/payments/${order.id}/pay`, { card: 'declined' });
+  }
   assert.equal((await call('POST', '/api/payments', {})).status, 429);
 });
 

@@ -86,6 +86,10 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `ui`: A second click on "Pay" during the bank pause no longer sends a second payment; reopening the checkout continues the same unpaid order instead of starting a new one each time.
+- `ui`: Background requests (AI explanations, the bot link, payment history) no longer keep a just-submitted form locked; a test summary asks for at most 2 AI explanations at a time instead of all at once (the server allows 3 per student).
+- `api`: The data export includes question explanations, Dueboard Prep's end date and the payment history, as the privacy page promises.
+- `api`: `/reply` from the team chat says when the answer could not be delivered; a team chat that is someone's private chat with the bot keeps working as a normal chat; the guest and privacy pages stop asking Telegram for the bot name for 5 minutes after a failure.
 - `ui`: The guest page lists its points without emoji; the Dueboard Prep panel lists its features as a ruled list instead of cards in a card; the "why" note after a wrong answer has no side stripe; no long dashes on the checkout.
 - `api`: Gemini: a busy model falls back to the other Gemini model, each attempt waits up to 150 s instead of hanging for 5 minutes, and keys starting with `AQ.` are recognised as Gemini keys.
 - `api`: AI questions from files without slides (DOCX, TXT, MD) are kept instead of dropped.

@@ -281,7 +281,7 @@ function showAuth() {
 
   // The Telegram button appears once the server says which bot it is.
   const tgSlot = h('div', { class: 'landing-tg' });
-  api('GET', '/api/public').then(({ bot }) => {
+  request('GET', '/api/public').then(({ bot }) => {
     if (!bot) return;
     tgSlot.replaceChildren(h('a', {
       class: 'button secondary', href: `https://t.me/${encodeURIComponent(bot)}`, target: '_blank', rel: 'noopener noreferrer',
@@ -985,7 +985,7 @@ function accountCard() {
 
 // What Dueboard keeps, who else sees it and how to take it all back. Keep it in step with the code: it is a promise.
 async function showPrivacy(seq) {
-  const info = await api('GET', '/api/privacy-info').catch(() => ({ bot: null, ai: null, support: false, storageMb: 100 }));
+  const info = await request('GET', '/api/privacy-info').catch(() => ({ bot: null, ai: null, support: false, storageMb: 100 }));
   if (stale(seq)) return;
   const section = (title, ...body) => h('section', { class: 'privacy-section' }, h('h2', {}, title), body);
   const item = (title, text) => h('li', {}, h('strong', {}, title), ' ', text);
@@ -1086,11 +1086,14 @@ async function showCheckout(seq) {
   const useCard = (c) => { number.value = c.number; expiry.value = `12/${nextYear}`; cvc.value = '123'; error.hidden = true; number.focus(); };
 
   const fail = (text) => { error.textContent = text; error.hidden = false; };
+  let paying = false;
   const submit = h('button', { type: 'submit', class: 'pay-submit' }, `Сплатити ${order.amount} грн`);
   const form = h('form', {
     class: 'pay-form', novalidate: true,
     onsubmit: async (e) => {
       e.preventDefault();
+      // The pause below runs before any request, so the shared form lock would let a second click through.
+      if (paying) return;
       error.hidden = true;
       const test = DEMO_CARDS.find((c) => digitsOnly(c.number) === digitsOnly(number.value));
       if (!test) return fail('Це демо-оплата: введіть одну з тестових карток нижче. Справжні картки тут не приймаються.');
@@ -1098,12 +1101,13 @@ async function showCheckout(seq) {
       const expired = !mm || mm > 12 || yy === undefined || new Date(2000 + yy, mm) <= new Date();
       if (expired) return fail('Перевірте строк дії картки: ММ/РР, не в минулому.');
       if (cvc.value.length !== 3) return fail('CVC — три цифри зі звороту картки.');
+      paying = true;
       submit.disabled = true;
       submit.textContent = 'Обробляємо платіж…';
       form.classList.add('busy');
       await new Promise((r) => setTimeout(r, 1200)); // the pause a real bank takes, so the flow reads as one
       const result = await act(() => api('POST', `/api/payments/${order.id}/pay`, { card: test.card }));
-      if (!result) { submit.disabled = false; submit.textContent = `Сплатити ${order.amount} грн`; form.classList.remove('busy'); return; }
+      if (!result) { paying = false; submit.disabled = false; submit.textContent = `Сплатити ${order.amount} грн`; form.classList.remove('busy'); return; }
       await refreshMe();
       showPaymentResult(result);
     },
@@ -1158,7 +1162,7 @@ function subscriptionCard() {
       : h('p', {}, `Не активний. ${me.premium.price} грн на ${me.premium.days} днів відкривають підготовку до екзаменів.`),
     h('a', { class: 'button secondary', href: '#/pay' }, me.premium.active ? 'Продовжити' : `Оформити за ${me.premium.price} грн`));
   const history = h('div', {});
-  api('GET', '/api/payments').then((list) => {
+  request('GET', '/api/payments').then((list) => {
     const done = list.filter((p) => p.status !== 'pending');
     if (!done.length) return;
     history.replaceChildren(h('details', {}, h('summary', {}, `Історія оплат (${done.length})`),
@@ -1726,6 +1730,18 @@ function sourceHint(source) {
 
 // "Why": the question's explanation, or one the AI writes the first time someone gets it wrong (then it is kept).
 const explaining = new Map();
+// Background requests (request, not api) so a slow AI answer never keeps a form locked; two at a time, the rest wait.
+let explainSlots = 2;
+const explainWaiting = [];
+async function explainOne(id) {
+  if (explainSlots > 0) explainSlots--; else await new Promise((resolve) => explainWaiting.push(resolve));
+  try {
+    return await request('POST', `/api/questions/${id}/explain`, {});
+  } finally {
+    const next = explainWaiting.shift();
+    if (next) next(); else explainSlots++;
+  }
+}
 function whyBox(q, aiEnabled) {
   const box = h('div', { class: 'quiz-why', 'aria-live': 'polite' });
   const show = (text) => box.replaceChildren(h('strong', {}, 'Чому так: '), text);
@@ -1733,7 +1749,7 @@ function whyBox(q, aiEnabled) {
   if (!aiEnabled) return null;
   box.replaceChildren(h('span', { class: 'muted' }, 'Готую пояснення…'));
   if (!explaining.has(q.id)) {
-    explaining.set(q.id, api('POST', `/api/questions/${q.id}/explain`, {})
+    explaining.set(q.id, explainOne(q.id)
       .then((r) => { q.explanation = r.explanation; return r.explanation; })
       .finally(() => explaining.delete(q.id)));
   }

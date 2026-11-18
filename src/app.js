@@ -2,7 +2,7 @@
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parseIcs } from './ics.js';
-import { urgency, DAY } from './urgency.js';
+import { urgency, DAY, HOUR } from './urgency.js';
 import {
   dueReminders, reminderText, parseReminders, supersededBy, REMINDER_WINDOWS,
 } from './reminders.js';
@@ -233,9 +233,12 @@ export function createApp({
   // An order for one package. Unpaid orders older than a day are dropped, so the list stays short.
   const orderLimit = createLimiter({ limit: 20, windowMs: 60 * MINUTE, now });
   route('POST', '/api/payments', ({ user, res }) => {
+    run("DELETE FROM payments WHERE user_id = ? AND status = 'pending' AND created_at < ?", user.id, now() - DAY);
+    // Opening the checkout again (a reload, Back) continues the same unpaid order instead of starting a new one.
+    const open = one("SELECT * FROM payments WHERE user_id = ? AND status = 'pending' AND created_at > ? ORDER BY id DESC LIMIT 1", user.id, now() - HOUR);
+    if (open) return paymentView(open);
     guard(res, [orderLimit, `u${user.id}`]);
     orderLimit.hit(`u${user.id}`);
-    run("DELETE FROM payments WHERE user_id = ? AND status = 'pending' AND created_at < ?", user.id, now() - DAY);
     const orderRef = `DB-${new Date(now()).toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`;
     const { lastInsertRowid } = run(
       "INSERT INTO payments (user_id, order_ref, amount, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
@@ -574,7 +577,7 @@ export function createApp({
           id: t.id,
           name: t.name,
           questions: questions.filter((q) => q.topicId === t.id).map((q) => ({
-            id: q.id, prompt: q.prompt, options: q.options, answerIndex: q.answerIndex, source: sources.get(q.id) || null,
+            id: q.id, prompt: q.prompt, options: q.options, answerIndex: q.answerIndex, explanation: q.explanation || null, source: sources.get(q.id) || null,
           })),
           problems: problems.filter((x) => x.topic_id === t.id).map((x) => x.text),
         })),
@@ -597,7 +600,12 @@ export function createApp({
         morningDigest: Boolean(user.tg_digest),
         reminders: parseReminders(user.tg_remind),
         calendarFeed: Boolean(user.cal_token_hash),
+        dueboardPrepUntil: iso(user.premium_until),
       },
+      payments: all("SELECT * FROM payments WHERE user_id = ? AND status != 'pending' ORDER BY id", user.id).map((p) => ({
+        order: p.order_ref, amount: p.amount / 100, status: p.status, testCardLast4: p.card_last4,
+        at: iso(p.paid_at || p.created_at), activeUntil: iso(p.active_until),
+      })),
       deadlines: boardItems(user).filter((item) => item.source !== 'exam').map((item) => ({
         id: item.id, title: item.title, course: item.course, dueAt: iso(item.dueAt), source: item.source,
         url: item.url, note: item.note, done: item.done,
@@ -997,10 +1005,23 @@ export function createApp({
   });
 
   // Why the right answer is right, for a question without an explanation: the AI writes one once, then it is kept.
+  const explainingNow = new Map(); // user id -> AI explanations being written right now
   route('POST', '/api/questions/:id/explain', async ({ user, params }) => {
     const question = ownItem(user, 'questions', params.id, 'Питання не знайдено');
     if (question.explanation) return { explanation: question.explanation };
     if (!ai.enabled) throw new HttpError(503, 'AI-пояснення на цьому сервері не налаштовані');
+    const busy = explainingNow.get(user.id) || 0;
+    if (busy >= 3) throw new HttpError(429, 'Пояснення пишуться для кількох питань одразу. Спробуйте за хвилину.');
+    explainingNow.set(user.id, busy + 1);
+    try {
+      return await writeExplanation(user, question);
+    } finally {
+      const left = (explainingNow.get(user.id) || 1) - 1;
+      if (left > 0) explainingNow.set(user.id, left); else explainingNow.delete(user.id);
+    }
+  });
+
+  async function writeExplanation(user, question) {
     const { used } = one('SELECT COUNT(*) AS used FROM ai_explains WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
     if (used >= AI_EXPLAINS_PER_DAY) throw new HttpError(429, `Пояснень можна отримати ${AI_EXPLAINS_PER_DAY} на день. Спробуйте завтра.`);
     run('INSERT INTO ai_explains (user_id, created_at) VALUES (?, ?)', user.id, now());
@@ -1012,7 +1033,7 @@ export function createApp({
     run('UPDATE questions SET explanation = ? WHERE id = ? AND explanation IS NULL AND prompt = ? AND options = ? AND answer_index = ?',
       explanation, question.id, question.prompt, question.options, question.answer_index);
     return { explanation };
-  });
+  }
 
   route('DELETE', '/api/questions/:id', ({ user, params }) => {
     const { changes } = run(
@@ -1324,8 +1345,12 @@ export function createApp({
 
   async function handleTeamReply(body) {
     const match = /^\/reply(?:@\w+)?\s+(-?\d+)\s+([\s\S]+)$/.exec(body.trim());
-    if (!match) return;
-    await telegram.send(match[1], `💬 Відповідь команди Dueboard:\n${match[2].trim().slice(0, 3000)}`);
+    if (!match) return telegram.send(teamChatId, 'Формат: /reply <id чату> текст відповіді');
+    try {
+      await telegram.send(match[1], `💬 Відповідь команди Dueboard:\n${match[2].trim().slice(0, 3000)}`);
+    } catch (err) {
+      return telegram.send(teamChatId, `Не вдалося надіслати в чат ${match[1]}: ${err.message}`);
+    }
     return telegram.send(teamChatId, `Надіслано в чат ${match[1]}.`);
   }
 
@@ -1336,7 +1361,8 @@ export function createApp({
     const body = typeof message?.text === 'string' ? message.text : message?.caption;
     if (!message?.chat || typeof body !== 'string') return;
     // The team's chat answers a /support message with "/reply <chat id> text".
-    if (teamChatId && String(message.chat.id) === String(teamChatId)) return handleTeamReply(body);
+    // Only /reply is read there, so a team chat that is someone's private chat with the bot still works as a normal chat.
+    if (teamChatId && String(message.chat.id) === String(teamChatId) && /^\/reply(@\w+)?(\s|$)/i.test(body.trim())) return handleTeamReply(body);
     // Setting up /support: in a group, "/chatid" tells the id to put into TEAM_CHAT_ID.
     if (message.chat.type && message.chat.type !== 'private' && /^\/chatid(@\w+)?$/i.test(body.trim())) {
       return telegram.send(String(message.chat.id), `ID цього чату: ${message.chat.id}\nДодайте на сервері в /etc/dueboard.env рядок TEAM_CHAT_ID=${message.chat.id} і перезапустіть Dueboard.`);
