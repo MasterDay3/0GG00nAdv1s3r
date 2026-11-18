@@ -14,7 +14,7 @@ import { createLimiter, clientIp } from './limiter.js';
 import { buildCalendar } from './ics-export.js';
 import { safeFetch } from './safe-fetch.js';
 import {
-  NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText,
+  NOT_LINKED, DIGEST_HOUR, DIGEST_WINDOW, localParts, deadlinesText, digestText, groupDeadlineText, linkedText, helpText, digestOffText,
 } from './bot.js';
 
 const MAX_JSON = 64 * 1024;
@@ -1205,7 +1205,7 @@ export function createApp({
       // One chat follows one Dueboard account.
       run('UPDATE users SET tg_chat_id = NULL WHERE tg_chat_id = ? AND id != ?', chatId, target.id);
       run('UPDATE users SET tg_chat_id = ?, tg_link_code = NULL WHERE id = ?', chatId, target.id);
-      return reply(linkedText(target.username));
+      return reply(linkedText(target.username, parseReminders(target.tg_remind)));
     }
     if (command === '/deadlines') {
       return reply(user ? deadlinesText(openItems(user), now()) : NOT_LINKED);
@@ -1216,14 +1216,14 @@ export function createApp({
       run('UPDATE users SET tg_digest = ? WHERE id = ?', on ? 1 : 0, user.id);
       return reply(on
         ? `Ранковий дайджест увімкнено. Він приходитиме о ${DIGEST_HOUR}:00, коли цього тижня є дедлайни або план підготовки до екзамену.`
-        : 'Ранковий дайджест вимкнено. Нагадування за 3 дні й за 1 день до дедлайну й далі приходитимуть. Надішліть /digest, щоб увімкнути його знову.');
+        : digestOffText(parseReminders(user.tg_remind)));
     }
     if (command === '/stop') {
       if (!user) return reply(NOT_LINKED);
       run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
       return reply('Чат відв’язано, повідомлень більше не буде. Під’єднатися знову можна в Dueboard → Налаштування.');
     }
-    return reply(helpText(Boolean(user)));
+    return reply(helpText(Boolean(user), user ? parseReminders(user.tg_remind) : []));
   }
 
   async function runReminders() {

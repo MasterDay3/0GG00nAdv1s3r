@@ -78,15 +78,36 @@ export function groupDeadlineText(author, item, now) {
   return `📌 ${author} додає дедлайн для вашої групи:\n\n${itemLine(item, now)}`;
 }
 
-export function linkedText(username) {
-  return `Чат прив’язано до Dueboard як ${username}. Нагадування приходитимуть за 3 дні й за 1 день до кожного дедлайну, `
-    + `а о ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня є дедлайни або план підготовки до екзамену.\n\n${commandList()}`;
+// The reminders a user picked, earliest first, as words: "за 3 дні, за 1 день і за 3 години".
+const REMINDER_WORDS = { '3d': 'за 3 дні', '1d': 'за 1 день', '3h': 'за 3 години' };
+export function remindersPhrase(kinds) {
+  const words = ['3d', '1d', '3h'].filter((k) => kinds.includes(k)).map((k) => REMINDER_WORDS[k]);
+  if (!words.length) return null;
+  return words.length === 1 ? words[0] : `${words.slice(0, -1).join(', ')} і ${words.at(-1)}`;
 }
 
-export function helpText(linked) {
+// What the bot sends about deadlines, in the user's own settings (reminders can be changed or turned off on the site).
+function remindersSentence(kinds) {
+  const phrase = remindersPhrase(kinds);
+  return phrase
+    ? `Нагадування приходять ${phrase} до кожного дедлайну.`
+    : 'Нагадування про дедлайни вимкнені (увімкнути можна в Dueboard → Налаштування).';
+}
+
+const DIGEST_SENTENCE = `О ${DIGEST_HOUR}:00 — короткий дайджест, коли цього тижня є дедлайни або план підготовки до екзамену.`;
+
+export function linkedText(username, kinds) {
+  return `Чат прив’язано до Dueboard як ${username}. ${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${commandList()}`;
+}
+
+export function helpText(linked, kinds = []) {
   if (!linked) return `Привіт! Я бот Dueboard. ${NOT_LINKED}`;
-  return `Я нагадую про дедлайни за 3 дні й за 1 день і надсилаю дайджест о ${DIGEST_HOUR}:00, `
-    + `коли цього тижня є дедлайни або план підготовки до екзамену.\n\n${commandList()}`;
+  return `${remindersSentence(kinds)} ${DIGEST_SENTENCE}\n\n${commandList()}`;
+}
+
+export function digestOffText(kinds) {
+  const phrase = remindersPhrase(kinds);
+  return `Ранковий дайджест вимкнено.${phrase ? ` Нагадування ${phrase} до дедлайну й далі приходитимуть.` : ''} Надішліть /digest, щоб увімкнути його знову.`;
 }
 
 function commandList() {

@@ -289,6 +289,28 @@ test('telegram: /deadlines, /digest, /stop, /help and group chats', async (t) =>
   assert.equal((await call('GET', '/api/me')).data.telegram.linked, false);
 });
 
+test('telegram: bot texts name the reminders the user picked, or say they are off', async (t) => {
+  const { app, base, sent, close } = await start();
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+
+  await linkTelegram(app, call, 7);
+  assert.match(sent.at(-1).text, /Нагадування приходять за 3 дні і за 1 день до кожного дедлайну/, 'defaults');
+
+  await call('PUT', '/api/telegram/reminders', { kinds: ['3h', '3d'] });
+  await tg(app, 7, '/help');
+  assert.match(sent.at(-1).text, /Нагадування приходять за 3 дні і за 3 години до кожного дедлайну/);
+  assert.doesNotMatch(sent.at(-1).text, /за 1 день/);
+  await tg(app, 7, '/digest');
+  assert.match(sent.at(-1).text, /Нагадування за 3 дні і за 3 години до дедлайну й далі приходитимуть/);
+
+  await call('PUT', '/api/telegram/reminders', { kinds: [] });
+  await tg(app, 7, '/help');
+  assert.match(sent.at(-1).text, /Нагадування про дедлайни вимкнені/);
+  await tg(app, 7, '/digest');
+  assert.doesNotMatch(sent.at(-1).text, /приходитимуть/);
+});
+
 test('telegram: group deadline is announced to the other linked members', async (t) => {
   const { app, base, sent, close } = await start();
   t.after(close);
