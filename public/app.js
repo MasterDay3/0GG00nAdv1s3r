@@ -184,6 +184,8 @@ async function render() {
   const route = location.hash || '#/board';
   const [, view = 'board', id] = route.split('/');
   for (const a of nav.querySelectorAll('a')) a.classList.toggle('active', a.dataset.view === view);
+  // Readable without an account: a student should know what happens to their data before signing up.
+  if (view === 'privacy') return showPrivacy(seq).catch((err) => setView(h('div', { class: 'panel empty' }, err.message)));
   if (!me) return showAuth();
   try {
     if (view === 'pay') await showCheckout(seq);
@@ -297,7 +299,8 @@ function showAuth() {
         h('li', {}, h('span', { 'aria-hidden': 'true' }, '🎯'), 'AI-тест з ваших слайдів показує слабкі теми')),
       tgSlot),
     h('div', { class: 'auth' },
-      h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot)))));
+      h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot),
+        h('p', { class: 'auth-privacy muted small' }, 'Що ми зберігаємо і як усе видалити: ', h('a', { href: '#/privacy' }, 'конфіденційність'), '.')))));
 }
 
 // Forgotten password: a code comes to the Telegram chat linked to the account.
@@ -961,6 +964,7 @@ function accountCard() {
   h('button', { type: 'submit', class: 'danger' }, 'Видалити акаунт'));
 
   return [
+    h('p', { class: 'muted small' }, 'Що Dueboard зберігає, кому передає і як усе видалити: ', h('a', { href: '#/privacy' }, 'конфіденційність'), '.'),
     h('div', { class: 'export' },
       h('button', { type: 'button', class: 'secondary', onclick: downloadExport }, 'Завантажити всі мої дані'),
       h('p', { class: 'muted small' }, 'Дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
@@ -975,6 +979,60 @@ function accountCard() {
     h('details', {}, h('summary', {}, 'Видалити акаунт'), deleteForm),
     me.telegram.linked ? null : h('p', { class: 'muted small spaced' }, 'Порада: прив’яжіть Telegram, щоб мати змогу відновити пароль, якщо забудете.'),
   ];
+}
+
+// ---------- privacy ----------
+
+// What Dueboard keeps, who else sees it and how to take it all back. Keep it in step with the code: it is a promise.
+async function showPrivacy(seq) {
+  const info = await api('GET', '/api/privacy-info').catch(() => ({ bot: null, ai: null, support: false, storageMb: 100 }));
+  if (stale(seq)) return;
+  const section = (title, ...body) => h('section', { class: 'privacy-section' }, h('h2', {}, title), body);
+  const item = (title, text) => h('li', {}, h('strong', {}, title), ' ', text);
+  const bot = info.bot ? h('a', { href: `https://t.me/${encodeURIComponent(info.bot)}`, target: '_blank', rel: 'noopener noreferrer' }, `@${info.bot}`) : 'Dueboard';
+  setView(
+    me ? h('a', { class: 'back', href: '#/settings' }, 'Налаштування') : h('a', { class: 'back', href: '#/board' }, 'Dueboard'),
+    h('div', { class: 'page-head' },
+      h('h1', {}, 'Конфіденційність'),
+      h('p', { class: 'muted' }, 'Dueboard — навчальний проєкт студентів УКУ. Коротко: що ми зберігаємо, навіщо, кому це передається і як усе видалити. Оновлено 18 листопада 2026.')),
+    h('div', { class: 'panel privacy' },
+      section('Що ми зберігаємо',
+        h('ul', {},
+          item('Акаунт.', 'Ім’я користувача і пароль у вигляді хешу (scrypt): самого пароля ми не знаємо. Пошти чи телефону не просимо.'),
+          item('Посилання на календар Moodle.', 'Воно працює як особистий ключ: з ним можна читати ваш календар Moodle. Зберігається лише на сервері й не потрапляє у вивантаження ваших даних.'),
+          item('Дедлайни.', 'З Moodle, ваші власні й групові, а ще нотатки до них і позначки «виконано».'),
+          item('Підготовка до екзаменів.', `Екзамени, теми, питання, задачі, результати тестів і завантажені файли (слайди), до ${info.storageMb} МБ на акаунт.`),
+          item('Telegram.', 'Номер чату, якщо ви прив’язали бота, і коли надсилати нагадування. Повідомлення, які ви пересилаєте боту, ми не зберігаємо: лише знайдені в них дедлайни, доки ви їх не додасте чи не відхилите (не довше 2 днів).'),
+          item('Оплати Dueboard Prep.', 'Сума, дата й останні 4 цифри тестової картки. Оплата демонстраційна: справжні картки не приймаються, номер картки на сервер не надсилається.'),
+          item('Технічне.', 'Час останньої синхронізації та текст її помилки; лічильники спроб входу за IP-адресою, щоб ніхто не підбирав пароль (лише в пам’яті сервера, до його перезапуску); журнали сервера з іменем користувача, коли щось ламається.'))),
+      section('Кому це передається',
+        h('ul', {},
+          item('AI-сервіс.', info.ai
+            ? `${info.ai}: ваші слайди й матеріали, коли ви генеруєте питання; питання й відповідь, коли просите пояснення; переслане боту повідомлення, щоб знайти в ньому дедлайн. Лише тоді, коли ви самі це запускаєте.`
+            : 'На цьому сервері AI вимкнено, тож матеріали нікуди не надсилаються.'),
+          item('Telegram.', 'Тексти нагадувань і дайджестів (назви дедлайнів), якщо ви прив’язали бота.'),
+          item('Moodle УКУ.', 'Сервер або розширення Dueboard Sync завантажує ваш календар за вашим посиланням.'),
+          item('Google Fonts.', 'Браузер завантажує звідти шрифт сайту, тож Google бачить вашу IP-адресу.'),
+          item('Хостинг.', 'Сервер працює в AWS у Франкфурті (ЄС).')),
+        h('p', {}, 'Ми не продаємо дані, не показуємо реклами і не ставимо аналітики чи трекерів.')),
+      section('Cookies і браузер',
+        h('p', {}, 'Один файл cookie, ', h('span', { class: 'code' }, 'sid'), ': щоб ви лишалися в акаунті. Діє 30 днів, недоступний для скриптів сторінки. Інших cookies немає.'),
+        h('p', {}, 'Щоб дошка відкривалася без інтернету, браузер зберігає копію сторінки й ваших дедлайнів на вашому пристрої. Вона стирається, коли ви виходите з акаунта.')),
+      section('Скільки зберігаємо',
+        h('p', {}, 'Доки існує ваш акаунт. Коли ви його видаляєте, усе стирається з бази одразу. Ще деякий час дані лишаються в резервних копіях: у п’яти останніх копіях бази перед оновленнями сервера і в щоденних знімках диска, які з часом замінюються новими.')),
+      section('Ваші права',
+        h('ul', {},
+          item('Подивитися і забрати все:', 'Налаштування → Акаунт → «Завантажити всі мої дані» (файл JSON).'),
+          item('Виправити:', 'дедлайни, екзамени, питання й нотатки можна редагувати.'),
+          item('Від’єднати:', 'Telegram командою /stop або в Налаштуваннях; розширення кнопкою «Від’єднати»; посилання для календаря — кнопкою «Вимкнути» в розділі «Google чи Apple Календар».'),
+          item('Видалити акаунт:', 'Налаштування → Акаунт → «Видалити акаунт». Це назавжди.'))),
+      section('Як ми це бережемо',
+        h('p', {}, 'Лише HTTPS; паролі тільки у вигляді хешу; обмеження спроб входу; розширення має окремий ключ, який уміє лише оновлювати календар; секретні посилання показуються один раз.')),
+      section('Питання',
+        info.support
+          ? h('p', {}, 'Напишіть боту ', bot, ' команду ', h('span', { class: 'code' }, '/support ваше питання'), '. Вона дійде до людей, які роблять Dueboard, а відповідь прийде в той самий чат.')
+          : h('p', {}, 'Напишіть боту ', bot, ' команду ', h('span', { class: 'code' }, '/support'), '. Якщо підтримка на цьому сервері ще не налаштована, бот про це скаже.'))));
+  window.scrollTo(0, 0);
 }
 
 // ---------- Dueboard Prep: the paid package (demo payments) ----------

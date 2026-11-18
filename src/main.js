@@ -20,6 +20,8 @@ const app = createApp({
   db: openDb(DB_PATH), telegram, ai, secureCookies: process.env.COOKIE_SECURE === '1', storageLimit: storageMb * 1024 * 1024,
   // Exam prep is the paid package (demo payments); PAYWALL=0 opens it to everyone.
   paywall: process.env.PAYWALL !== '0',
+  // The team's Telegram chat: /support questions from students arrive there.
+  teamChatId: process.env.TEAM_CHAT_ID || null,
 });
 
 createServer(app.handler).listen(PORT, HOST, () => {

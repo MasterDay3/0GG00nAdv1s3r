@@ -551,3 +551,11 @@ a.button.primary {
   box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-sheet) 32%, transparent), inset 0 -1px 0 color-mix(in oklab, var(--color-ink) 10%, transparent);
 }
 a.button.primary:hover { background: color-mix(in oklab, var(--color-accent) 90%, var(--color-ink)); }
+
+/* ---------- privacy page ---------- */
+.privacy { display: grid; gap: var(--space-xl); max-width: 760px; }
+.privacy-section h2 { margin: 0 0 var(--space-sm); font-size: var(--text-section); }
+.privacy-section p { margin: 0 0 var(--space-sm); line-height: 1.6; max-width: 68ch; }
+.privacy-section ul { margin: 0; padding-left: 1.2rem; display: grid; gap: var(--space-xs); line-height: 1.6; max-width: 68ch; }
+.privacy-section + .privacy-section { padding-top: var(--space-lg); border-top: var(--rule-hair) solid var(--color-rule); }
+.auth-privacy { margin: var(--space-xs) 0 0; }

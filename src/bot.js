@@ -13,6 +13,7 @@ export const COMMANDS = [
   { command: 'digest', description: 'Увімкнути чи вимкнути ранковий дайджест' },
   { command: 'help', description: 'Що вміє цей бот' },
   { command: 'stop', description: 'Відв’язати цей чат від Dueboard' },
+  { command: 'support', description: 'Написати команді Dueboard (питання, ваші дані)' },
 ];
 
 export const NOT_LINKED = 'Цей чат ще не прив’язаний до Dueboard. Відкрийте Dueboard → Налаштування → «Під’єднати Telegram».';

@@ -133,7 +133,7 @@ function normalizeFeedUrl(value) {
 // storageLimit: bytes of uploaded files one user may keep, across all their exams.
 export function createApp({
   db, now = () => Date.now(), fetchImpl = safeFetch, telegram, secureCookies = false, ai = createAi(),
-  storageLimit = 100 * 1024 * 1024, paywall = false,
+  storageLimit = 100 * 1024 * 1024, paywall = false, teamChatId = null,
 }) {
   // Behind HTTPS the session cookie must never travel over plain HTTP.
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${secureCookies ? '; Secure' : ''}`;
@@ -510,6 +510,14 @@ export function createApp({
   // For the guest page: the Telegram bot to link to (null when the bot is off or Telegram does not answer).
   route('GET', '/api/public', async () => ({
     bot: telegram.enabled ? await telegram.botName().catch(() => null) : null,
+  }), { auth: false });
+
+  // For the privacy page: which AI provider gets materials, the bot, and whether /support reaches a person.
+  route('GET', '/api/privacy-info', async () => ({
+    bot: telegram.enabled ? await telegram.botName().catch(() => null) : null,
+    ai: ai.enabled ? ai.label : null,
+    support: Boolean(teamChatId && telegram.enabled),
+    storageMb: Math.round(storageLimit / 1024 / 1024),
   }), { auth: false });
 
   // ---------- routes: account ----------
@@ -1295,12 +1303,40 @@ export function createApp({
     await telegram.answerButton(query.id, answer);
   }
 
+  // ---------- Telegram: /support to the team ----------
+
+  const supportLimit = createLimiter({ limit: 5, windowMs: 60 * MINUTE, now });
+
+  // A question for the people behind Dueboard: it goes to the team's chat, the answer comes back to this chat.
+  async function handleSupport(user, chatId, question, reply) {
+    if (!teamChatId) return reply('Підтримка через бота поки не налаштована на цьому сервері.');
+    if (!question) return reply('Напишіть питання в тому ж повідомленні, наприклад:\n/support Як видалити всі мої дані?');
+    if (supportLimit.blockedFor(chatId)) return reply('Ви вже надіслали кілька питань за годину. Зачекайте на відповідь, будь ласка.');
+    supportLimit.hit(chatId);
+    const who = user ? `акаунт ${user.username}` : 'чат без акаунта';
+    await telegram.send(teamChatId, `📩 Питання (${who}, чат ${chatId}):\n${question.slice(0, 3000)}\n\nВідповісти: /reply ${chatId} ваш текст`);
+    return reply('Надіслано команді Dueboard. Відповідь прийде сюди, у цей чат.');
+  }
+
+  async function handleTeamReply(body) {
+    const match = /^\/reply(?:@\w+)?\s+(-?\d+)\s+([\s\S]+)$/.exec(body.trim());
+    if (!match) return;
+    await telegram.send(match[1], `💬 Відповідь команди Dueboard:\n${match[2].trim().slice(0, 3000)}`);
+    return telegram.send(teamChatId, `Надіслано в чат ${match[1]}.`);
+  }
+
   async function handleTelegramUpdate(update) {
     if (update.callback_query) return handleTelegramButton(update.callback_query);
     const message = update.message;
     // A forwarded photo or file carries its words in the caption.
     const body = typeof message?.text === 'string' ? message.text : message?.caption;
     if (!message?.chat || typeof body !== 'string') return;
+    // The team's chat answers a /support message with "/reply <chat id> text".
+    if (teamChatId && String(message.chat.id) === String(teamChatId)) return handleTeamReply(body);
+    // Setting up /support: in a group, "/chatid" tells the id to put into TEAM_CHAT_ID.
+    if (message.chat.type && message.chat.type !== 'private' && /^\/chatid(@\w+)?$/i.test(body.trim())) {
+      return telegram.send(String(message.chat.id), `ID цього чату: ${message.chat.id}\nДодайте на сервері в /etc/dueboard.env рядок TEAM_CHAT_ID=${message.chat.id} і перезапустіть Dueboard.`);
+    }
     // Deadlines are personal: only answer in a private chat with the bot, never in group chats.
     if (message.chat.type && message.chat.type !== 'private') return;
     const chatId = String(message.chat.id);
@@ -1333,6 +1369,7 @@ export function createApp({
       run('UPDATE users SET tg_chat_id = NULL WHERE id = ?', user.id);
       return reply('Чат відв’язано, повідомлень більше не буде. Під’єднатися знову можна в Dueboard → Налаштування.');
     }
+    if (command === '/support') return handleSupport(user, chatId, body.trim().slice(word.length).trim(), reply);
     if (user && !command.startsWith('/')) return draftsFromMessage(user, chatId, message, body);
     return reply(helpText(Boolean(user), user ? parseReminders(user.tg_remind) : []));
   }
