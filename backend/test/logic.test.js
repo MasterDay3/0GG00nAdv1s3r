@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { urgency, HOUR, DAY } from '../src/urgency.js';
-import { dueReminders, parseReminders, supersededBy } from '../src/reminders.js';
-import { buildPlan, addDays, daysBetween } from '../src/plan.js';
-import { scoreDiagnostic } from '../src/diagnostic.js';
-import { formatDue, localParts, digestText, kyivToMs } from '../src/bot.js';
+import { urgency, HOUR, DAY } from '../src/lib/urgency.js';
+import { dueReminders, parseReminders, supersededBy } from '../src/bot/reminders.js';
+import { buildPlan, addDays, daysBetween } from '../src/lib/plan.js';
+import { scoreDiagnostic } from '../src/lib/diagnostic.js';
+import { formatDue, localParts, digestText, kyivToMs } from '../src/bot/texts.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 

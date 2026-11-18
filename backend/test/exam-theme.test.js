@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
-import { createAi } from '../src/ai.js';
+import { createAi } from '../src/clients/ai.js';
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0, 0);
 const DAY = 86_400_000;

@@ -4,8 +4,8 @@ import { createServer } from 'node:http';
 import { deflateRawSync, crc32 } from 'node:zlib';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
-import { createAi, cleanQuestions, materialBlocks, aiConfigFromEnv, MODEL } from '../src/ai.js';
-import { unzip, pptxSlides, docxText, kindOf } from '../src/slides.js';
+import { createAi, cleanQuestions, materialBlocks, aiConfigFromEnv, MODEL } from '../src/clients/ai.js';
+import { unzip, pptxSlides, docxText, kindOf } from '../src/lib/slides.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 

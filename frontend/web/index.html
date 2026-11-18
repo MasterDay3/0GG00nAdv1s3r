@@ -18,7 +18,19 @@
   <meta name="apple-mobile-web-app-title" content="Dueboard">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="/style.css">
-  <script type="module" src="/app.js"></script>
+  <!-- All modules at once instead of one import level after another. -->
+  <link rel="modulepreload" href="/js/core.js">
+  <link rel="modulepreload" href="/js/router.js">
+  <link rel="modulepreload" href="/js/auth.js">
+  <link rel="modulepreload" href="/js/board.js">
+  <link rel="modulepreload" href="/js/extension.js">
+  <link rel="modulepreload" href="/js/settings.js">
+  <link rel="modulepreload" href="/js/privacy.js">
+  <link rel="modulepreload" href="/js/payments.js">
+  <link rel="modulepreload" href="/js/courses.js">
+  <link rel="modulepreload" href="/js/prep.js">
+  <link rel="modulepreload" href="/js/quiz.js">
+  <script type="module" src="/js/main.js"></script>
 </head>
 <body>
   <header class="topbar">

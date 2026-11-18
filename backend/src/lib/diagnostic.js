@@ -1,3 +1,4 @@
+// Scores a diagnostic test per topic: strong from 70 % right answers.
 export const STRONG_THRESHOLD = 0.7;
 
 // topics: [{ id, name }]; questions: [{ id, topicId, answerIndex }]; answers: { [questionId]: optionIndex }

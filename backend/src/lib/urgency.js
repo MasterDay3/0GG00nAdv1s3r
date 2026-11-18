@@ -1,3 +1,4 @@
+// Time units, and how urgent a deadline is: red under 48 h, amber under 7 days, grey later.
 export const HOUR = 60 * 60 * 1000;
 export const DAY = 24 * HOUR;
 

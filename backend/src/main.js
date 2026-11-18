@@ -1,10 +1,11 @@
+// Starts Dueboard: settings from the environment, the HTTP server, Telegram polling and the background timers.
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
 import { createApp } from './app.js';
 import { openDb } from './db.js';
-import { createTelegram } from './telegram.js';
-import { COMMANDS } from './bot.js';
-import { createAi, aiConfigFromEnv } from './ai.js';
+import { createTelegram } from './clients/telegram.js';
+import { COMMANDS } from './bot/texts.js';
+import { createAi, aiConfigFromEnv } from './clients/ai.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';

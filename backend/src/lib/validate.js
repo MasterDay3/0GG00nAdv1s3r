@@ -1,3 +1,4 @@
+// HttpError, and the checks for what a request body may contain.
 export class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -39,4 +40,11 @@ export function timestamp(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new HttpError(400, `${label}: має бути датою`);
   if (value < EARLIEST || value > LATEST) throw new HttpError(400, `${label}: дата має бути між 2000 і 2100 роками`);
   return Math.round(value);
+}
+
+// A Moodle calendar link as pasted: webcal:// becomes https://, then it must be a web link.
+export function normalizeFeedUrl(value) {
+  let url = text(value, 'Посилання на календар', { max: 2000, required: false });
+  if (/^webcals?:\/\//i.test(url)) url = url.replace(/^webcals?:/i, 'https:');
+  return link(url, 'Посилання на календар');
 }

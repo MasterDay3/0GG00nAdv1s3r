@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCalendar, escapeText, foldLine } from '../src/ics-export.js';
-import { parseIcs } from '../src/ics.js';
+import { buildCalendar, escapeText, foldLine } from '../src/lib/ics-export.js';
+import { parseIcs } from '../src/lib/ics.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 

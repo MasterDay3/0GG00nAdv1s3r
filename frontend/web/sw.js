@@ -1,8 +1,11 @@
 // Offline support. Network first, so an online visit always gets the newest code and data;
 // without a connection the last saved page and board are shown instead.
-const SHELL_CACHE = 'dueboard-shell-v2';
+const SHELL_CACHE = 'dueboard-shell-v3';
 const DATA_CACHE = 'dueboard-data'; // the page clears it on log out
-const SHELL = ['/', '/app.js', '/style.css', '/tokens.css', '/base.css', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png'];
+const SHELL = ['/', '/style.css', '/tokens.css', '/base.css', '/favicon.svg', '/manifest.webmanifest', '/icon-192.png',
+  // every module of the app (frontend/web/js); a new module must be added here to work offline
+  '/js/auth.js', '/js/board.js', '/js/core.js', '/js/courses.js', '/js/extension.js', '/js/main.js',
+  '/js/payments.js', '/js/prep.js', '/js/privacy.js', '/js/quiz.js', '/js/router.js', '/js/settings.js'];
 // Read-only answers worth showing offline. Everything else (writes, files, AI) needs the network.
 const DATA = /^\/api\/(me|deadlines|exams(\/\d+)?)$/;
 

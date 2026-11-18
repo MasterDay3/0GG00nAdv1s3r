@@ -13,11 +13,12 @@ a day-by-day plan counted back from the exam date, and progress across attempts.
 
 ```
 backend/     Node.js server: HTTP API, SQLite, Moodle sync, Telegram bot, AI features
-  src/         main.js starts the server; app.js holds the routes; one module per concern (ics, reminders, ai, ...)
+  src/         main.js starts it; app.js wires the parts; routes/ (API by area), services/ (shared logic),
+               bot/ (Telegram), clients/ (AI, Telegram API), lib/ (small helpers), jobs.js (background work)
   test/        node:test suites (API, logic, security), run with npm test
   package.json
 frontend/
-  web/         the site: a single-page app in plain JavaScript (no build step), styles, service worker, icons
+  web/         the site: index.html, styles, service worker, icons; js/ holds the app as ES modules (no build step)
   extension/   Chrome extension that syncs Moodle from the student's browser (see below)
 infra/       production: setup.sh (install or update a server), autodeploy.sh, systemd units
 CHANGELOG.md what changed, by release

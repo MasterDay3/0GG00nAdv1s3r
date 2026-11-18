@@ -1,5 +1,6 @@
-import { DAY, HOUR } from './urgency.js';
-import { formatDue } from './bot.js';
+// Telegram reminders: which ones a user's deadlines are due for, and their text.
+import { DAY, HOUR } from '../lib/urgency.js';
+import { formatDue } from './texts.js';
 
 // Reminder kinds, from the latest to the earliest; each fires once when that much time (or less) is left.
 export const REMINDER_WINDOWS = { '3h': 3 * HOUR, '1d': DAY, '3d': 3 * DAY };

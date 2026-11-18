@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
-import { COMMANDS } from '../src/bot.js';
+import { COMMANDS } from '../src/bot/texts.js';
 
 const TEAM = '-100555';
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseIcs, parseIcsDate } from '../src/ics.js';
+import { parseIcs, parseIcsDate } from '../src/lib/ics.js';
 
 const MOODLE_FEED = [
   'BEGIN:VCALENDAR',
@@ -72,7 +72,7 @@ test('parseIcsDate falls back to Kyiv time for an unknown time zone', () => {
 });
 
 test('ics: all-day and floating times are Kyiv time whatever the process time zone', async () => {
-  const { parseIcsDate } = await import('../src/ics.js');
+  const { parseIcsDate } = await import('../src/lib/ics.js');
   // 20 Nov 2026 is winter time in Kyiv (UTC+2); 1 Jul 2026 is summer time (UTC+3).
   assert.equal(parseIcsDate('20261120'), Date.UTC(2026, 10, 20, 21, 59));
   assert.equal(parseIcsDate('20260701T120000'), Date.UTC(2026, 6, 1, 9, 0));

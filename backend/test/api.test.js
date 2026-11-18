@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
-import { DAY, HOUR } from '../src/urgency.js';
+import { DAY, HOUR } from '../src/lib/urgency.js';
 
 const NOW = Date.UTC(2026, 10, 14, 12, 0, 0);
 
@@ -406,7 +406,7 @@ test('telegram: a forwarded message becomes a deadline after a tap, for me or my
   assert.equal((await mykola('GET', '/api/deadlines')).data.items.length, before);
 
   // An AI that does not answer in time: a clear message instead of silence.
-  ai.extractDeadlines = async () => { const { HttpError } = await import('../src/validate.js'); throw new HttpError(504, 'slow'); };
+  ai.extractDeadlines = async () => { const { HttpError } = await import('../src/lib/validate.js'); throw new HttpError(504, 'slow'); };
   await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'есе до п’ятниці' } });
   assert.match(sent.at(-1).text, /AI зараз перевантажений/);
   assert.ok(sent.at(-2).deleted, 'the reading note is removed on failure too');
@@ -932,6 +932,43 @@ test('moodle: a calendar link to an internal address is refused, manual syncs ar
   assert.match(sync.data.error, /внутрішню адресу/);
   for (let i = 1; i < 10; i++) await call('POST', '/api/sync', {});
   assert.equal((await call('POST', '/api/sync', {})).status, 429);
+});
+
+test('static: the app is served as ES modules from /js/, nothing outside it', async (t) => {
+  const { base, close } = await start();
+  t.after(close);
+  const page = await (await fetch(`${base}/`)).text();
+  assert.match(page, /<script type="module" src="\/js\/main\.js"><\/script>/);
+  const main = await fetch(`${base}/js/main.js`);
+  assert.equal(main.status, 200);
+  assert.match(main.headers.get('content-type'), /^text\/javascript/);
+  // every module main.js pulls in is served too
+  for (const name of ['core', 'router', 'auth', 'board', 'extension', 'settings', 'privacy', 'payments', 'courses', 'prep', 'quiz']) {
+    assert.equal((await fetch(`${base}/js/${name}.js`)).status, 200, name);
+  }
+  for (const path of ['/js/missing.js', '/js/..%2Fsw.js', '/js/Main.js', '/app.js']) {
+    assert.equal((await fetch(`${base}${path}`)).status, 404, path);
+  }
+});
+
+// The server's auto-deploy runs node --test from the repository root, which treats any file named like a test as one.
+test('structure: only backend/test holds files that node --test would run', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const root = new URL('../../', import.meta.url);
+  const looksLikeTest = /(^test\.[cm]?js$)|([.\-_]test\.[cm]?js$)|(^test-.*\.[cm]?js$)/;
+  const found = [];
+  async function walk(dir, rel) {
+    for (const entry of await readdir(new URL(rel, root), { withFileTypes: true })) {
+      if (['.git', 'node_modules', 'data'].includes(entry.name) || entry.name.startsWith('.')) continue;
+      const path = `${rel}${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === 'test' && path !== 'backend/test') found.push(`${path}/`);
+        else await walk(dir, `${path}/`);
+      } else if (looksLikeTest.test(entry.name) && !path.startsWith('backend/test/')) found.push(path);
+    }
+  }
+  await walk(root, '');
+  assert.deepEqual(found, []);
 });
 
 test('security headers: HSTS only behind HTTPS, permissions locked down', async (t) => {

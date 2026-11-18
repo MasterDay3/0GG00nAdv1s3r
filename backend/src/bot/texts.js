@@ -1,5 +1,5 @@
 // Telegram bot texts. Times are always shown in Kyiv time, whatever the server's own time zone is.
-import { urgency, DAY } from './urgency.js';
+import { urgency, DAY } from '../lib/urgency.js';
 
 export const TIME_ZONE = 'Europe/Kyiv';
 export const DIGEST_HOUR = 8;

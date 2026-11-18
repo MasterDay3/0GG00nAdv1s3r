@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { createSafeFetch, isPublicAddress, safeFetch } from '../src/safe-fetch.js';
+import { createSafeFetch, isPublicAddress, safeFetch } from '../src/lib/safe-fetch.js';
 
 test('safe fetch: private, loopback, link-local and metadata addresses are not public', () => {
   for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0',
