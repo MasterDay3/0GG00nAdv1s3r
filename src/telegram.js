@@ -31,10 +31,13 @@ export function createTelegram({ token, fetchImpl = globalThis.fetch, log = cons
       if (text.length > 4000) text = `${text.slice(0, 3990)}\n…`;
       const rows = buttons || (doneKey ? [[{ text: '✅ Виконано', data: `done:${doneKey}` }]] : null);
       const markup = rows ? { reply_markup: { inline_keyboard: rows.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) } } : {};
-      await call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true, ...markup });
+      return call('sendMessage', { chat_id: chatId, text, disable_web_page_preview: true, ...markup });
     },
     async editMessage(chatId, messageId, text) {
       if (token) await call('editMessageText', { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true });
+    },
+    async deleteMessage(chatId, messageId) {
+      if (token) await call('deleteMessage', { chat_id: chatId, message_id: messageId });
     },
     async answerButton(queryId, text) {
       if (token) await call('answerCallbackQuery', { callback_query_id: queryId, text });

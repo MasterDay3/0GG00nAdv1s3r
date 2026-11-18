@@ -144,7 +144,10 @@ const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","op
   + '"material_id":1,"slide":3,"quote":"…"}]}';
 
 // Deadlines in a message a student forwards to the bot (usually from a course chat).
+// A student waits in the chat for this one: a short timeout per model, not the minutes a slide deck may take.
 const EXTRACT_SPEC = {
+  timeout: 60_000,
+  attemptTimeout: 30_000,
   system: `You read a message a university student got, usually forwarded from a course chat, and list the deadlines in it: work to hand in, tests, exams, registrations.
 For each one give:
 - title: short, what has to be done, in the language of the message;
@@ -175,6 +178,8 @@ When there is no deadline in the message, return an empty list.`,
 // Writing a question set vs. explaining one existing question: what each request asks for and gets back.
 const QUESTIONS_SPEC = { system: SYSTEM, schema: SCHEMA, example: JSON_EXAMPLE };
 const EXPLAIN_SPEC = {
+  timeout: 60_000,
+  attemptTimeout: 30_000,
   system: `You explain one practice exam question to a university student who just answered it wrong.
 In 2-4 sentences: why the correct answer is right, worked out on the question's own numbers or case, and the slip that leads to the tempting wrong options.
 Write in the language of the question. No greeting, no restating the question.`,
@@ -230,7 +235,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
         output_config: { effort: 'medium', format: { type: 'json_schema', schema: spec.schema } },
         system: spec.system,
         messages: [{ role: 'user', content: [...blocks, { type: 'text', text: task }] }],
-      });
+      }, { timeout: spec.timeout });
       if (data.stop_reason === 'refusal') throw declined();
       if (data.stop_reason === 'max_tokens') throw cutOff();
       return data.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
@@ -254,7 +259,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
           response_format: { type: 'text', mime_type: 'application/json', schema: spec.schema },
           generation_config: { max_output_tokens: 16000 },
           store: false,
-        }, { busyOk: i < models.length - 1, timeout: PROVIDERS.gemini.attemptTimeout });
+        }, { busyOk: i < models.length - 1, timeout: spec.attemptTimeout ?? PROVIDERS.gemini.attemptTimeout });
         if (data) break;
         console.error(`Gemini ${m} is busy, trying ${models[i + 1]}`);
       }
@@ -291,7 +296,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
           { role: 'system', content: `${spec.system}\n\nReply with json only, in exactly this shape: ${spec.example}` },
           { role: 'user', content },
         ],
-      });
+      }, { timeout: spec.timeout });
       const choice = data.choices?.[0];
       if (choice?.finish_reason === 'length') throw cutOff();
       if (choice?.finish_reason === 'content_filter') throw declined();

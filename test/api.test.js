@@ -27,9 +27,10 @@ async function start(options = {}) {
   const telegram = {
     enabled: true,
     botName: async () => 'dueboard_test_bot',
-    send: async (chatId, text, options = {}) => { sent.push({ chatId, text, ...options }); },
+    send: async (chatId, text, options = {}) => { sent.push({ chatId, text, ...options }); return { message_id: sent.length }; },
     editMessage: async (chatId, messageId, text) => { sent.push({ chatId, messageId, text, edited: true }); },
     answerButton: async (queryId, text) => { sent.push({ queryId, text, answer: true }); },
+    deleteMessage: async (chatId, messageId) => { sent.push({ chatId, messageId, deleted: true }); },
   };
   const app = createApp({ db: openDb(':memory:'), now: () => NOW, telegram, ...options });
   const server = createServer(app.handler);
@@ -358,7 +359,9 @@ test('telegram: a forwarded message becomes a deadline after a tap, for me or my
     text: 'Есе з етики до п’ятниці 23:59, а тест з ООП 25.11',
   } });
   assert.equal(asked[0].sentAt, forwardedAt * 1000);
-  const [essay, test2] = sent;
+  assert.equal(sent[0].text, '📖 Читаю повідомлення…', 'answers at once');
+  assert.ok(sent.some((m) => m.deleted && m.messageId === 1), 'and removes the note when the answer comes');
+  const [essay, test2] = sent.filter((m) => m.buttons);
   assert.match(essay.text, /Знайшов дедлайн:\nЕсе з етики, курс Етика\nпт, 20 лист\., 23:59\nhttps:\/\/learn\.example\/a\/7/);
   assert.match(test2.text, /Тест з ООП, курс ООП\nср, 25 лист\., 23:59/, 'no time means the end of the day');
   const labels = essay.buttons.flat().map((b) => b.text);
@@ -401,6 +404,13 @@ test('telegram: a forwarded message becomes a deadline after a tap, for me or my
   await press(third.replace(/:me$/, ':no'));
   assert.match(sent.find((m) => m.edited)?.text || '', /Скасовано/);
   assert.equal((await mykola('GET', '/api/deadlines')).data.items.length, before);
+
+  // An AI that does not answer in time: a clear message instead of silence.
+  ai.extractDeadlines = async () => { const { HttpError } = await import('../src/validate.js'); throw new HttpError(504, 'slow'); };
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'есе до п’ятниці' } });
+  assert.match(sent.at(-1).text, /AI зараз перевантажений/);
+  assert.ok(sent.at(-2).deleted, 'the reading note is removed on failure too');
+  ai.extractDeadlines = async ({ text, sentAt }) => { asked.push({ text, sentAt }); return []; };
 
   // Group chats and unlinked chats are not read.
   const calls = asked.length;

@@ -1293,13 +1293,20 @@ export function createApp({
     // Relative dates ("до п'ятниці") count from when the message was first sent, not when it was forwarded.
     const sentSeconds = message.forward_origin?.date ?? message.forward_date ?? message.date;
     const sentAt = Number.isFinite(sentSeconds) ? sentSeconds * 1000 : now();
+    // The AI takes a few seconds: say so at once, so the chat does not look dead; the note goes when the answer comes.
+    const reading = await reply('📖 Читаю повідомлення…').catch(() => null);
+    const doneReading = () => reading?.message_id && telegram.deleteMessage?.(chatId, reading.message_id).catch(() => {});
     let found;
     try {
       found = await ai.extractDeadlines({ text, sentAt });
     } catch (err) {
+      doneReading();
       if (!(err instanceof HttpError)) console.error('Deadline extraction failed:', err);
-      return reply('Не вдалося розібрати повідомлення. Спробуйте ще раз за хвилину.');
+      return reply(err instanceof HttpError && [503, 504].includes(err.status)
+        ? 'AI зараз перевантажений і не встиг відповісти. Спробуйте ще раз за хвилину або додайте дедлайн на сайті.'
+        : 'Не вдалося розібрати повідомлення. Спробуйте ще раз за хвилину.');
     }
+    doneReading();
     if (!found.length) return reply(`Не знайшов тут дедлайну. ${FORWARD_HINT}`);
     for (const d of found) {
       const dueAt = d.date ? kyivToMs(d.date, d.time || '23:59') : NaN;
