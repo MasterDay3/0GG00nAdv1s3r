@@ -941,9 +941,9 @@ function accountCard() {
   h('button', { type: 'submit', class: 'danger' }, 'Видалити акаунт'));
 
   return [
-    h('p', { class: 'small' },
-      h('button', { type: 'button', class: 'link', onclick: downloadExport }, 'Завантажити всі мої дані'),
-      h('span', { class: 'muted' }, ': дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
+    h('div', { class: 'export' },
+      h('button', { type: 'button', class: 'secondary', onclick: downloadExport }, 'Завантажити всі мої дані'),
+      h('p', { class: 'muted small' }, 'Дедлайни, нотатки, екзамени, питання й результати тестів одним файлом JSON.')),
     h('details', {}, h('summary', {}, 'Змінити пароль'), passwordForm),
     h('details', {},
       h('summary', {}, 'Вийти на всіх пристроях'),
@@ -1022,6 +1022,7 @@ async function showPrep(seq) {
   const [exams, courses] = await Promise.all([api('GET', '/api/exams'), api('GET', '/api/courses')]);
   const titleInput = h('input', { name: 'title', required: true, maxlength: 200, placeholder: 'напр. Матаналіз, підсумковий' });
   const form = h('form', {
+    class: 'stack',
     onsubmit: async (e) => {
       e.preventDefault();
       const f = formData(form);

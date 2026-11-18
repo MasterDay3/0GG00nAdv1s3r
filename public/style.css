@@ -1,5 +1,5 @@
-/* Hallmark · checked: 2026-11-17 · genre: modern-minimal · shape: app screen
- * floor: 0 FAIL · fixed: 10 (10a, 39a, 3, 19, 63, 30a, 16, 64, 49a, F4) · structural: none printed
+/* Hallmark · checked: 2026-11-18 · genre: modern-minimal · shape: app screen
+ * floor: 0 FAIL · fixed: 9 (4, 39a, 26a, F17, F14, F12, 72, 49b, F15) · structural: none printed
  * built: Hallmark · theme: Furrow · nav: kept top bar, wordmark and four links · signature: the deadline ledger ruled by day, the next one open as a notebook card · redesign: polish · v2.0.0 */
 /* Hallmark · dismissed 40 · the dark block swaps error-soft to a dark fill under light ink, checked in the dark render; the linter paired the light fill with the dark-mode ink */
 /* Hallmark · answered F4 · the right and wrong quiz options are answer feedback fills, not buttons a student presses next; one filled primary per screen otherwise */
@@ -196,7 +196,7 @@ details > form > * + * { margin-top: var(--space-sm); }
 .ledger { list-style: none; margin: 0; padding: 0; }
 
 .item {
-  position: relative; display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: var(--space-2xs) var(--space-md);
+  position: relative; display: grid; grid-template-columns: 116px minmax(0, 1fr) auto; gap: var(--space-2xs) var(--space-md);
   padding: var(--space-sm) 0 var(--space-sm) var(--space-md); border-bottom: var(--rule-hair) solid var(--color-rule);
 }
 .item::before { content: ""; position: absolute; left: 0; top: var(--space-sm); bottom: var(--space-sm); width: 4px; border-radius: 2px; background: var(--color-grey-strip); }
@@ -234,7 +234,7 @@ a.title:hover { text-decoration-color: var(--color-ink); }
 
 .exam-list { list-style: none; margin: 0; padding: 0; border-top: var(--rule-hair) solid var(--color-ink); }
 .exam-link {
-  display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; gap: var(--space-md); align-items: baseline;
+  display: grid; grid-template-columns: 176px minmax(0, 1fr) auto; gap: var(--space-md); align-items: baseline;
   padding: var(--space-md) var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule);
   text-decoration: none; color: var(--color-ink); transition: background-color var(--dur-micro) var(--ease-out);
 }
@@ -247,7 +247,8 @@ a.title:hover { text-decoration-color: var(--color-ink); }
 
 .topic { border-top: var(--rule-hair) solid var(--color-rule); padding-top: var(--space-md); margin-top: var(--space-md); }
 .panel > h2 + .topic { border-top: none; padding-top: 0; margin-top: var(--space-lg); }
-.q { margin: var(--space-xs) 0; padding: var(--space-sm); background: var(--color-paper); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-pill); }
+/* A tinted well inside the panel, not a second bordered card. */
+.q { margin: var(--space-xs) 0; padding: var(--space-sm) var(--space-md); background: var(--color-paper-3); border-radius: var(--radius-pill); }
 .q ol { margin: var(--space-xs) 0 0; padding-left: 1.4rem; }
 .q li.correct { color: var(--color-green); font-weight: 500; }
 .q .kind { display: block; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted); margin-bottom: var(--space-3xs); }
@@ -363,8 +364,10 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
   /* Four destinations on one row on a phone: the full width, a step smaller, never wrapping. */
   #nav { width: 100%; flex-wrap: nowrap; justify-content: space-between; gap: 0; }
   #nav a, #nav .link { padding: 0 var(--space-2xs); font-size: var(--text-sm); white-space: nowrap; }
-  .item { grid-template-columns: minmax(0, 1fr) auto; }
-  .due { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-xs); }
+  /* One column on a phone: time, then the title at full width, then the buttons; never a sliver of title. */
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .due { display: flex; align-items: center; gap: var(--space-xs); }
+  .item-actions { flex-wrap: wrap; margin-top: var(--space-2xs); }
   .note { grid-column: 1 / -1; }
   .counts { gap: var(--space-lg); }
 }
@@ -443,3 +446,15 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .file-chosen { min-width: 0; overflow-wrap: anywhere; }
 .field-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--color-muted); margin-bottom: var(--space-2xs); }
 .exam-theme { margin-top: var(--space-xs); max-width: 60ch; }
+
+/* Design audit 2026-11-18 */
+/* Route changes move focus to the page heading for screen readers; it is not a control, so no ring. */
+h1[tabindex="-1"]:focus { outline: none; }
+/* Text fields and selects share the button height, so a field and its button line up. */
+input:not([type=checkbox]):not([type=radio]):not([type=file]), select { height: var(--control); padding-block: 0; }
+/* A status pill and its sentence sit on one line, centred, the buttons below with air. */
+p:has(> .status-ok) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-sm); }
+.export p { margin-top: var(--space-2xs); }
+.setting-body .export + details { margin-top: var(--space-md); }
+.topic > .head { align-items: center; }
+.storage { margin-bottom: var(--space-sm); }
