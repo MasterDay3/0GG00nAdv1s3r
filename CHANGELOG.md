@@ -29,6 +29,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `ui`: Privacy page (`#/privacy`, readable without an account, linked from the login screen and Settings → Акаунт): what Dueboard stores, which services get what (the AI provider in use, Telegram, Moodle, Google Fonts, AWS), the one cookie, how long data stays (backups included) and how to export, disconnect or delete everything.
+- `api`: `/support <питання>` in the Telegram bot forwards the question to the team chat (`TEAM_CHAT_ID`); the team answers with `/reply <chat id> текст`. `/chatid` in a group shows the id to set. 5 questions an hour per chat.
 - `api`: Dueboard Prep, the paid package: 149 грн for 30 days unlocks the whole exam prep section (the board, Telegram and Moodle sync stay free). Payment is a built-in demo checkout with test cards only, no real money and no external service; paying again adds 30 days on top of the time left. Settings shows the package and the payment history. `PAYWALL=0` opens exam prep to everyone.
 - `db`: `users.premium_until` column and `payments` table.
 - `api`: Forward the Telegram bot a message with a deadline: the AI reads it and the bot offers "add for me", "add for my group" or "cancel". Telegram updates are no longer handled one after another, so a slow AI call does not hold up other users.
