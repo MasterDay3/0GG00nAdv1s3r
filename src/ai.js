@@ -26,6 +26,7 @@ Rules:
 - Never copy a question, an exercise or a worked example from the materials, and never reproduce questions from a quiz, test or past exam found in them. Change the setting and the values so the question cannot be used to answer a graded Moodle quiz.
 - 3-5 answer options, exactly one correct. Wrong options should be mistakes a student really makes. answer_index is the 0-based index of the correct option.
 - For each question give the material it comes from (material_id), the slide or page it is based on (slide, counted from 1; use 0 when the material has no slides or pages) and a short quote of up to 20 words from that slide showing the idea being tested (quote).
+- For every question write a short explanation (explanation), 1-3 sentences: why the right answer is right and which slip leads to the most tempting wrong option. The student sees it after a wrong answer.
 - Write in the language of the materials.
 - Do not repeat questions the student already has; they are listed under their topics.`;
 
@@ -39,12 +40,13 @@ const SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['topic', 'prompt', 'options', 'answer_index', 'material_id', 'slide', 'quote'],
+        required: ['topic', 'prompt', 'options', 'answer_index', 'explanation', 'material_id', 'slide', 'quote'],
         properties: {
           topic: { type: 'string' },
           prompt: { type: 'string' },
           options: { type: 'array', items: { type: 'string' } },
           answer_index: { type: 'integer' },
+          explanation: { type: 'string' },
           material_id: { type: 'integer' },
           slide: { type: 'integer' },
           quote: { type: 'string' },
@@ -119,7 +121,8 @@ export function cleanQuestions(raw, count, slideCount) {
     const slide = Number.isInteger(q.slide) && slideCount.get(q.material_id) !== 0 ? q.slide : 0;
     if (slide < 0 || slide > slideCount.get(q.material_id)) continue;
     const quote = typeof q.quote === 'string' ? q.quote.trim().slice(0, 300) : '';
-    result.push({ topic, prompt, options, answerIndex: q.answer_index, materialId: q.material_id, slide, quote });
+    const explanation = typeof q.explanation === 'string' ? q.explanation.trim().slice(0, 1000) : '';
+    result.push({ topic, prompt, options, answerIndex: q.answer_index, explanation, materialId: q.material_id, slide, quote });
   }
   return result;
 }
@@ -137,8 +140,18 @@ export function aiConfigFromEnv(env) {
   return { provider, apiKey, model: env.AI_MODEL || undefined };
 }
 
-const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","options":["…","…","…"],"answer_index":0,'
+const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","options":["…","…","…"],"answer_index":0,"explanation":"…",'
   + '"material_id":1,"slide":3,"quote":"…"}]}';
+
+// Writing a question set vs. explaining one existing question: what each request asks for and gets back.
+const QUESTIONS_SPEC = { system: SYSTEM, schema: SCHEMA, example: JSON_EXAMPLE };
+const EXPLAIN_SPEC = {
+  system: `You explain one practice exam question to a university student who just answered it wrong.
+In 2-4 sentences: why the correct answer is right, worked out on the question's own numbers or case, and the slip that leads to the tempting wrong options.
+Write in the language of the question. No greeting, no restating the question.`,
+  schema: { type: 'object', additionalProperties: false, required: ['explanation'], properties: { explanation: { type: 'string' } } },
+  example: '{"explanation":"…"}',
+};
 
 export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globalThis.fetch } = {}) {
   model ||= PROVIDERS[provider].model;
@@ -175,7 +188,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
 
   // Each returns the model's JSON text. blocks are the Claude-format blocks from materialBlocks.
   const ask = {
-    async claude(blocks, task) {
+    async claude(blocks, task, spec = QUESTIONS_SPEC) {
       const data = await post('https://api.anthropic.com/v1/messages', {
         'x-api-key': apiKey,
         'anthropic-version': '2026-10-21',
@@ -185,8 +198,8 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
         model,
         max_tokens: 16000,
         fallbacks: 'default',
-        output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
-        system: SYSTEM,
+        output_config: { effort: 'medium', format: { type: 'json_schema', schema: spec.schema } },
+        system: spec.system,
         messages: [{ role: 'user', content: [...blocks, { type: 'text', text: task }] }],
       });
       if (data.stop_reason === 'refusal') throw declined();
@@ -195,7 +208,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     },
 
     // Gemini Interactions API.
-    async gemini(blocks, task) {
+    async gemini(blocks, task, spec = QUESTIONS_SPEC) {
       const input = blocks.map((b) => (b.type === 'document'
         ? { type: 'document', data: b.source.data, mime_type: 'application/pdf' }
         : { type: 'text', text: b.text }));
@@ -207,9 +220,9 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
           'Api-Revision': '2026-05-20',
         }, {
           model: m,
-          system_instruction: SYSTEM,
+          system_instruction: spec.system,
           input: [...input, { type: 'text', text: task }],
-          response_format: { type: 'text', mime_type: 'application/json', schema: SCHEMA },
+          response_format: { type: 'text', mime_type: 'application/json', schema: spec.schema },
           generation_config: { max_output_tokens: 16000 },
           store: false,
         }, { busyOk: i < models.length - 1, timeout: PROVIDERS.gemini.attemptTimeout });
@@ -223,7 +236,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     },
 
     // DeepSeek chat completions. PDFs go through its Files API (it parses them); JSON mode has no schema, so the prompt shows one.
-    async deepseek(blocks, task) {
+    async deepseek(blocks, task, spec = QUESTIONS_SPEC) {
       const content = [];
       for (const b of blocks) {
         if (b.type !== 'document') { content.push({ type: 'text', text: b.text }); continue; }
@@ -246,7 +259,7 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
         max_tokens: 16000,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: `${SYSTEM}\n\nReply with json only, in exactly this shape: ${JSON_EXAMPLE}` },
+          { role: 'system', content: `${spec.system}\n\nReply with json only, in exactly this shape: ${spec.example}` },
           { role: 'user', content },
         ],
       });
@@ -283,5 +296,24 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
     return { questions: cleanQuestions(parsed?.questions, count, slideCount), skipped };
   }
 
-  return { enabled: Boolean(apiKey), provider, model, label, generateQuestions };
+  // A short explanation for a question that has none (written by hand, or made before explanations existed).
+  async function explainQuestion({ prompt, options, answerIndex, quote = '' }) {
+    if (!apiKey) throw new HttpError(503, 'AI-питання на цьому сервері не налаштовані (немає AI_API_KEY)');
+    const letters = 'ABCDEF';
+    const task = [
+      `Question: ${prompt}`,
+      ...options.map((o, i) => `${letters[i]}) ${o}`),
+      `Correct answer: ${letters[answerIndex]}) ${options[answerIndex]}`,
+      quote ? `From the lecture slide: "${quote}"` : '',
+    ].filter(Boolean).join('\n');
+    const text = await ask[provider]([], task, EXPLAIN_SPEC);
+    let explanation = '';
+    try {
+      explanation = String(JSON.parse(text)?.explanation || '').trim().slice(0, 1000);
+    } catch { /* handled below */ }
+    if (!explanation) throw new HttpError(502, `${label} не зміг пояснити це питання. Спробуйте ще раз.`);
+    return explanation;
+  }
+
+  return { enabled: Boolean(apiKey), provider, model, label, generateQuestions, explainQuestion };
 }

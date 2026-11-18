@@ -115,7 +115,7 @@ test('ai: clean questions drops malformed ones and stops at the asked count', ()
   assert.equal(cleaned.length, 4, 'stops at the asked count');
   assert.deepEqual(cleaned[0], {
     topic: 'Big O', prompt: 'A loop inside a loop over 1000 items runs how many times?', options: ['1000', '1 000 000', '2000'],
-    answerIndex: 1, materialId: 1, slide: 2, quote: 'Nested loops take O(n²)',
+    answerIndex: 1, explanation: '', materialId: 1, slide: 2, quote: 'Nested loops take O(n²)',
   });
   assert.deepEqual(cleaned.map((q) => q.topic), ['Big O', 'Big O', 'Recursion', 'Big O']);
   assert.deepEqual(cleanQuestions(raw, 30, slideCount).length, 7);
@@ -173,7 +173,7 @@ test('ai: generate stores questions with their slide and shows the source', asyn
     content: [
       { type: 'thinking', thinking: '' },
       { type: 'text', text: JSON.stringify({ questions: [
-        { topic: 'Big O', prompt: 'Two nested loops over 50 items: how many steps?', options: ['100', '2500', '50'], answer_index: 1, material_id: materialId, slide: 2, quote: 'Nested loops' },
+        { topic: 'Big O', prompt: 'Two nested loops over 50 items: how many steps?', options: ['100', '2500', '50'], answer_index: 1, explanation: '50 × 50 = 2500: the inner loop runs fully for each outer step.', material_id: materialId, slide: 2, quote: 'Nested loops' },
         { topic: 'Big O', prompt: 'Bad slide', options: ['a', 'b'], answer_index: 0, material_id: materialId, slide: 42, quote: '' },
       ] }) },
     ],
@@ -406,4 +406,47 @@ test('slides: a slide full of unclosed paragraphs is read in linear time', () =>
   const slides = pptxSlides(zip({ 'ppt/slides/slide1.xml': slide }));
   assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
   assert.equal(slides[0].text, 'Real text');
+});
+
+test('ai: explanations come with generated questions and on demand for the rest, once', async (t) => {
+  let materialId;
+  const claude = fakeClaude((body) => {
+    if (/explain one practice exam question/.test(body.system)) {
+      return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ explanation: 'Because sin x ≈ x near 0.' }) }] };
+    }
+    return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ questions: [
+      { topic: 'Big O', prompt: 'AI question', options: ['a', 'b'], answer_index: 0, explanation: 'Because a.', material_id: materialId, slide: 1, quote: 'q' },
+    ] }) }] };
+  });
+  const { call, close } = await start(createAi({ apiKey: 'k', fetchImpl: claude.fetchImpl }));
+  t.after(close);
+  const { exam, topic, material } = await examWithSlides(call);
+  materialId = material.id;
+
+  await call('POST', `/api/exams/${exam.id}/generate`, { count: 1 });
+  assert.match(claude.requests[0].body.system, /explanation/);
+  const manual = (await call('POST', `/api/topics/${topic.id}/questions`, { prompt: 'lim sin(x)/x at 0?', options: ['0', '1'], answerIndex: 1 })).data;
+  const own = (await call('POST', `/api/topics/${topic.id}/questions`, { prompt: 'Own', options: ['x', 'y'], answerIndex: 0, explanation: 'My own words.' })).data;
+
+  const byPrompt = (qs) => Object.fromEntries(qs.map((q) => [q.prompt, q.explanation]));
+  const test = (await call('GET', `/api/exams/${exam.id}/test`)).data.questions;
+  assert.deepEqual(byPrompt(test), { 'AI question': 'Because a.', 'lim sin(x)/x at 0?': '', Own: 'My own words.' });
+
+  // A question without one gets it from the AI once; the second ask is served from the database.
+  const first = await call('POST', `/api/questions/${manual.id}/explain`, {});
+  assert.deepEqual(first.data, { explanation: 'Because sin x ≈ x near 0.' });
+  const explainCalls = () => claude.requests.filter((r) => /explain one practice/.test(r.body.system)).length;
+  assert.equal(explainCalls(), 1);
+  assert.match(claude.requests.at(-1).body.messages[0].content.at(-1).text, /Correct answer: B\) 1/);
+  await call('POST', `/api/questions/${manual.id}/explain`, {});
+  assert.equal(explainCalls(), 1, 'cached');
+  assert.equal((await call('POST', `/api/questions/${own.id}/explain`, {})).data.explanation, 'My own words.');
+  assert.equal(explainCalls(), 1, 'a written explanation is never replaced');
+
+  // Changing the answer drops an explanation that may be wrong now; sending one keeps it.
+  await call('PUT', `/api/questions/${manual.id}`, { prompt: 'lim sin(x)/x at 0?', options: ['0', '1'], answerIndex: 0 });
+  assert.equal(byPrompt((await call('GET', `/api/exams/${exam.id}/test`)).data.questions)['lim sin(x)/x at 0?'], '');
+  await call('PUT', `/api/questions/${own.id}`, { prompt: 'Own', options: ['x', 'y'], answerIndex: 1, explanation: 'Now y.' });
+  assert.equal(byPrompt((await call('GET', `/api/exams/${exam.id}/test`)).data.questions).Own, 'Now y.');
+
 });

@@ -24,6 +24,7 @@ const MAX_FEED = 5 * 1024 * 1024;
 const MAX_BIG_BODIES = 4;
 const SESSION_TTL = 30 * DAY;
 const AI_RUNS_PER_DAY = 10;
+const AI_EXPLAINS_PER_DAY = 100;
 const RESET_TTL = 15 * 60 * 1000;
 const RESET_TRIES = 5;
 const RESET_FAILS_PER_DAY = 10;
@@ -349,7 +350,10 @@ export function createApp({
   function examQuestions(examId) {
     return all(
       `SELECT q.* FROM questions q JOIN topics t ON t.id = q.topic_id WHERE t.exam_id = ? ORDER BY t.id, q.id`, examId,
-    ).map((q) => ({ id: q.id, topicId: q.topic_id, prompt: q.prompt, options: JSON.parse(q.options), answerIndex: q.answer_index }));
+    ).map((q) => ({
+      id: q.id, topicId: q.topic_id, prompt: q.prompt, options: JSON.parse(q.options), answerIndex: q.answer_index,
+      explanation: q.explanation || '',
+    }));
   }
 
   function examDetail(exam) {
@@ -883,7 +887,8 @@ export function createApp({
     if (!Number.isInteger(body.answerIndex) || body.answerIndex < 0 || body.answerIndex >= options.length) {
       throw new HttpError(400, 'Вкажіть правильний варіант');
     }
-    return { prompt, options, answerIndex: body.answerIndex };
+    const explanation = text(body.explanation, 'Пояснення', { max: 1000, required: false });
+    return { prompt, options, answerIndex: body.answerIndex, explanation };
   }
 
   // A question or problem of one of the user's exams.
@@ -899,10 +904,10 @@ export function createApp({
 
   route('POST', '/api/topics/:id/questions', ({ user, params, body }) => {
     ownTopic(user, params.id);
-    const { prompt, options, answerIndex } = questionFields(body);
+    const { prompt, options, answerIndex, explanation } = questionFields(body);
     const { lastInsertRowid } = run(
-      'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
-      params.id, prompt, JSON.stringify(options), answerIndex,
+      'INSERT INTO questions (topic_id, prompt, options, answer_index, explanation) VALUES (?, ?, ?, ?, ?)',
+      params.id, prompt, JSON.stringify(options), answerIndex, explanation || null,
     );
     return { id: Number(lastInsertRowid) };
   });
@@ -910,7 +915,10 @@ export function createApp({
   // Editing keeps the question's topic; moving it is topicId (another topic of the same exam).
   route('PUT', '/api/questions/:id', ({ user, params, body }) => {
     const question = ownItem(user, 'questions', params.id, 'Питання не знайдено');
-    const { prompt, options, answerIndex } = questionFields(body);
+    const { prompt, options, answerIndex, explanation } = questionFields(body);
+    // An explanation sent along is kept; otherwise one for a changed question or answer is dropped, as it may be wrong now.
+    const changed = prompt !== question.prompt || JSON.stringify(options) !== question.options || answerIndex !== question.answer_index;
+    const newExplanation = body.explanation !== undefined ? explanation || null : (changed ? null : question.explanation);
     let topicId = question.topic_id;
     if (body.topicId !== undefined && body.topicId !== topicId) {
       const target = Number.isInteger(body.topicId) && ownTopic(user, body.topicId);
@@ -918,9 +926,27 @@ export function createApp({
       if (!target || target.exam_id !== current.exam_id) throw new HttpError(400, 'Тему не знайдено');
       topicId = target.id;
     }
-    run('UPDATE questions SET topic_id = ?, prompt = ?, options = ?, answer_index = ? WHERE id = ?',
-      topicId, prompt, JSON.stringify(options), answerIndex, params.id);
+    run('UPDATE questions SET topic_id = ?, prompt = ?, options = ?, answer_index = ?, explanation = ? WHERE id = ?',
+      topicId, prompt, JSON.stringify(options), answerIndex, newExplanation, params.id);
     return { ok: true };
+  });
+
+  // Why the right answer is right, for a question without an explanation: the AI writes one once, then it is kept.
+  route('POST', '/api/questions/:id/explain', async ({ user, params }) => {
+    const question = ownItem(user, 'questions', params.id, 'Питання не знайдено');
+    if (question.explanation) return { explanation: question.explanation };
+    if (!ai.enabled) throw new HttpError(503, 'AI-пояснення на цьому сервері не налаштовані');
+    const { used } = one('SELECT COUNT(*) AS used FROM ai_explains WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
+    if (used >= AI_EXPLAINS_PER_DAY) throw new HttpError(429, `Пояснень можна отримати ${AI_EXPLAINS_PER_DAY} на день. Спробуйте завтра.`);
+    run('INSERT INTO ai_explains (user_id, created_at) VALUES (?, ?)', user.id, now());
+    const quote = one('SELECT quote FROM question_sources WHERE question_id = ?', question.id)?.quote || '';
+    const explanation = await ai.explainQuestion({
+      prompt: question.prompt, options: JSON.parse(question.options), answerIndex: question.answer_index, quote,
+    });
+    // The question may have been edited while the AI was writing; keep the explanation only if it still fits.
+    run('UPDATE questions SET explanation = ? WHERE id = ? AND explanation IS NULL AND prompt = ? AND options = ? AND answer_index = ?',
+      explanation, question.id, question.prompt, question.options, question.answer_index);
+    return { explanation };
   });
 
   route('DELETE', '/api/questions/:id', ({ user, params }) => {
@@ -1003,8 +1029,8 @@ export function createApp({
     ).map((s) => [s.question_id, { filename: s.filename, slide: s.slide, quote: s.quote }]));
     // Practice on the student's own questions, so the answer comes along: the page shows right/wrong at once.
     return {
-      questions: examQuestions(params.id).map(({ id, topicId, prompt, options, answerIndex }) => ({
-        id, topicId, topic: topics.get(topicId), prompt, options, answerIndex, source: sources.get(id) || null,
+      questions: examQuestions(params.id).map(({ id, topicId, prompt, options, answerIndex, explanation }) => ({
+        id, topicId, topic: topics.get(topicId), prompt, options, answerIndex, explanation, source: sources.get(id) || null,
       })),
     };
   });
@@ -1082,8 +1108,8 @@ export function createApp({
     try {
       for (const q of result.questions) {
         const { lastInsertRowid } = run(
-          'INSERT INTO questions (topic_id, prompt, options, answer_index) VALUES (?, ?, ?, ?)',
-          topicFor(q.topic), q.prompt, JSON.stringify(q.options), q.answerIndex,
+          'INSERT INTO questions (topic_id, prompt, options, answer_index, explanation) VALUES (?, ?, ?, ?, ?)',
+          topicFor(q.topic), q.prompt, JSON.stringify(q.options), q.answerIndex, q.explanation || null,
         );
         run(
           'INSERT INTO question_sources (question_id, material_id, filename, slide, quote) VALUES (?, ?, ?, ?, ?)',

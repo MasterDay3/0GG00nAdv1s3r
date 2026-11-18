@@ -1125,7 +1125,9 @@ function questionForm(topic, reload) {
       e.preventDefault();
       const options = form.options.value.split('\n').map((s) => s.trim()).filter(Boolean);
       const answerIndex = Number(form.correct.value) - 1;
-      const ok = await act(() => api('POST', `/api/topics/${topic.id}/questions`, { prompt: form.prompt.value, options, answerIndex }));
+      const ok = await act(() => api('POST', `/api/topics/${topic.id}/questions`, {
+        prompt: form.prompt.value, options, answerIndex, explanation: form.explanation.value,
+      }));
       if (ok) reload();
     },
   },
@@ -1133,6 +1135,7 @@ function questionForm(topic, reload) {
   h('div', { class: 'row' },
     h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (від 2 до 6)', h('textarea', { name: 'options', required: true })),
     h('label', {}, '№ правильного', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: '1', required: true }))),
+  explanationField(''),
   h('button', { type: 'submit' }, 'Додати питання'));
   return h('details', {}, h('summary', {}, 'Додати питання'), form);
 }
@@ -1181,6 +1184,7 @@ function topicBlock(topic, reload, topics) {
       prompt: f.prompt,
       options: f.options.split('\n').map((s) => s.trim()).filter(Boolean),
       answerIndex: Number(f.correct) - 1,
+      explanation: f.explanation,
       topicId: Number(f.topicId),
     })),
   },
@@ -1188,6 +1192,7 @@ function topicBlock(topic, reload, topics) {
   h('div', { class: 'row' },
     h('label', { class: 'grow' }, 'Варіанти відповіді, кожен з нового рядка (від 2 до 6)', h('textarea', { name: 'options', required: true }, q.options.join('\n'))),
     h('label', {}, '№ правильного', h('input', { name: 'correct', type: 'number', min: 1, max: 6, value: String(q.answerIndex + 1), required: true }))),
+  explanationField(q.explanation),
   h('label', {}, 'Тема', h('select', { name: 'topicId' },
     topics.map((t) => h('option', { value: String(t.id), selected: t.id === topic.id }, t.name)))),
   saveCancel(reload));
@@ -1213,7 +1218,8 @@ function topicBlock(topic, reload, topics) {
             editButton(questionEdit(q)),
             h('button', { type: 'button', class: 'danger small', onclick: del(`/api/questions/${q.id}`, 'питання') }, 'Видалити'))),
         h('ol', {}, q.options.map((o, i) => h('li', { class: i === q.answerIndex ? 'correct' : '' }, o))),
-        sourceLine(q)))) : null,
+        sourceLine(q),
+        q.explanation ? h('p', { class: 'muted small why-line' }, h('strong', {}, 'Чому так: '), q.explanation) : null))) : null,
     topic.problems.map((p) => h('div', { class: 'q', 'data-edit': '' },
       h('div', { class: 'head' }, h('span', { class: 'pre' }, h('span', { class: 'kind' }, 'Задача'), p.text),
         h('div', { class: 'tools' },
@@ -1224,6 +1230,11 @@ function topicBlock(topic, reload, topics) {
 }
 
 // Where an AI-generated question comes from: the file, the slide and a short quote.
+function explanationField(value) {
+  return h('label', {}, 'Пояснення, чому правильна саме ця відповідь (необов’язково)',
+    h('textarea', { name: 'explanation', maxlength: 1000, placeholder: 'Без нього AI напише пояснення сам, коли хтось помилиться' }, value || ''));
+}
+
 function sourceLine(q) {
   if (!q.source) return null;
   const { materialId, filename, slide, quote } = q.source;
@@ -1517,6 +1528,23 @@ function sourceHint(source) {
   return h('p', { class: 'quiz-hint' }, h('span', { class: 'tag' }, 'З ваших слайдів'), ` ${where}`, source.quote ? `: «${source.quote}»` : '');
 }
 
+// "Why": the question's explanation, or one the AI writes the first time someone gets it wrong (then it is kept).
+const explaining = new Map();
+function whyBox(q, aiEnabled) {
+  const box = h('div', { class: 'quiz-why', 'aria-live': 'polite' });
+  const show = (text) => box.replaceChildren(h('strong', {}, 'Чому так: '), text);
+  if (q.explanation) { show(q.explanation); return box; }
+  if (!aiEnabled) return null;
+  box.replaceChildren(h('span', { class: 'muted' }, 'Готую пояснення…'));
+  if (!explaining.has(q.id)) {
+    explaining.set(q.id, api('POST', `/api/questions/${q.id}/explain`, {})
+      .then((r) => { q.explanation = r.explanation; return r.explanation; })
+      .finally(() => explaining.delete(q.id)));
+  }
+  explaining.get(q.id).then(show, () => box.replaceChildren(h('span', { class: 'muted' }, 'Пояснення зараз недоступне. Спробуйте пізніше.')));
+  return box;
+}
+
 // The diagnostic test, one question at a time with instant feedback. Scored on the server at the end.
 // only: question ids for a practice round on mistakes; it is not saved and does not change the diagnostic.
 async function showTest(exam, only = null) {
@@ -1591,6 +1619,7 @@ async function showTest(exam, only = null) {
           ? h('div', { class: `quiz-feedback ${chosen === q.answerIndex ? 'ok' : 'bad'}`, role: 'status' },
             h('strong', {}, chosen === q.answerIndex ? 'Правильно!' : 'Не зовсім.'),
             chosen === q.answerIndex ? null : ` Правильна відповідь ${LETTERS[q.answerIndex]}: ${q.options[q.answerIndex]}`,
+            chosen === q.answerIndex ? null : whyBox(q, exam.ai?.enabled),
             sourceHint(q.source))
           : h('p', { class: 'muted small quiz-keys' }, 'Виберіть відповідь або натисніть клавішу від 1 до ', String(q.options.length), '.')),
       h('div', { class: 'quiz-actions' },
@@ -1630,6 +1659,7 @@ async function showTest(exam, only = null) {
           h('p', { class: 'quiz-prompt pre' }, q.prompt),
           h('div', { class: 'quiz-options' }, q.options.map((_, i) => optionButton(q, i, answers[q.id] ?? -1, () => {}))),
           answers[q.id] === undefined ? h('p', { class: 'muted small' }, 'Без відповіді.') : null,
+          whyBox(q, exam.ai?.enabled),
           sourceHint(q.source)))) : h('p', { class: 'quiz-perfect' }, 'Жодної помилки.'),
       h('div', { class: 'quiz-actions' },
         mistakes.length ? h('button', { type: 'button', class: 'secondary', onclick: () => act(() => showTest(exam, mistakes.map((q) => q.id))) }, `Повторити помилки (${mistakes.length})`) : null,

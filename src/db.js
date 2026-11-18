@@ -127,6 +127,11 @@ export function openDb(path = ':memory:') {
   // What the exam covers, in the student's words; the AI keeps its questions to it.
   const examColumns = db.prepare('PRAGMA table_info(exams)').all().map((c) => c.name);
   if (!examColumns.includes('theme')) db.exec("ALTER TABLE exams ADD COLUMN theme TEXT NOT NULL DEFAULT ''");
+  // Why the right answer is right, shown after a wrong answer (NULL: none yet; the AI can write one on demand).
+  const questionColumns = db.prepare('PRAGMA table_info(questions)').all().map((c) => c.name);
+  if (!questionColumns.includes('explanation')) db.exec('ALTER TABLE questions ADD COLUMN explanation TEXT');
+  // AI explanations asked for, per user, for a daily limit.
+  db.exec('CREATE TABLE IF NOT EXISTS ai_explains (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_cal_token ON users (cal_token_hash)');
   // AI-generated questions: which uploaded file and slide each one comes from (slide 0 = the whole file).

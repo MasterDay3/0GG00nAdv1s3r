@@ -293,6 +293,9 @@ button.quiz-opt.dim { opacity: 0.55; }
 .quiz-feedback { width: 100%; padding: var(--space-sm) var(--space-md); border-radius: var(--radius-card); border: var(--rule-hair) solid; }
 .quiz-feedback.ok { border-color: var(--color-green); background: var(--color-green-soft); }
 .quiz-feedback.bad { border-color: var(--color-error); background: var(--color-error-soft); }
+.quiz-why { width: 100%; margin-top: var(--space-xs); padding-top: var(--space-xs); border-top: var(--rule-hair) solid color-mix(in oklab, var(--color-ink) 15%, transparent); line-height: 1.5; }
+.quiz-card > .quiz-why { padding: var(--space-sm) var(--space-md); margin: 0; border: none; border-left: 3px solid var(--color-accent); border-radius: var(--radius-pill); background: var(--color-paper); }
+.why-line { margin: var(--space-2xs) 0 0; }
 .quiz-hint { margin: var(--space-xs) 0 0; font-size: var(--text-sm); color: var(--color-ink-2); }
 .quiz-keys { margin: 0; }
 .quiz-actions { display: flex; justify-content: space-between; align-items: center; gap: var(--space-sm); margin-top: var(--space-md); }
