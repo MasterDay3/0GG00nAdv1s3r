@@ -73,6 +73,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `ui`: The test has its own address (`#/prep/<id>/test`): Back, the menu or closing the tab asks before dropping answers already given, instead of leaving silently.
 - `api`: A Moodle assignment that leaves the feed is hidden, not deleted: when the teacher shows it again it comes back with your note and done mark; after 60 days hidden it is removed.
 - `api`: All-day and zoneless Moodle times are read as Kyiv time whatever the server's time zone (the tests now pass in UTC and New York too); an event without a title is "Без назви".
 - `infra`: Auto-deploy backs up the database before each deploy, rolls back with the previous commit's whole setup, retries a deploy that failed for a passing reason, reads the health-check port from the settings, and leaves a version pinned by a manual `setup.sh` run alone; `setup.sh` takes the deploy lock, skips `apt` when the packages are there and fixes the settings file's permissions on every run.

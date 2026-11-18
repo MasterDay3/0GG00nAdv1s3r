@@ -204,7 +204,26 @@ async function render() {
 // True when a newer screen load started after this one.
 const stale = (seq) => seq !== undefined && seq !== renderSeq;
 
-window.addEventListener('hashchange', render);
+// A running test may block leaving it (Back, the menu, a link) until the student confirms.
+let leaveGuard = null;
+let guardHash = '';
+let skipHashchange = false;
+function setHashQuietly(hash) {
+  if (location.hash === hash) return;
+  skipHashchange = true;
+  location.hash = hash;
+}
+window.addEventListener('hashchange', () => {
+  if (skipHashchange) { skipHashchange = false; return; }
+  if (leaveGuard) {
+    if (!leaveGuard()) { setHashQuietly(guardHash); return; }
+    leaveGuard = null;
+  }
+  render();
+});
+window.addEventListener('beforeunload', (e) => {
+  if (leaveGuard && !leaveGuard(true)) e.preventDefault();
+});
 document.getElementById('logout').addEventListener('click', async () => {
   // Offline the session stays valid on the server: say so instead of only looking logged out.
   if (!(await act(() => api('POST', '/api/logout', {})))) return;
@@ -1377,7 +1396,11 @@ async function showTest(exam, only = null) {
   const root = h('div', { class: 'quiz' });
   const correctCount = () => order.filter((q) => answers[q.id] === q.answerIndex).length;
   const answeredCount = () => Object.keys(answers).length;
-  const backToExam = () => { location.hash = `#/prep/${exam.id}`; render(); };
+  let finished = false;
+  const backToExam = () => {
+    leaveGuard = null;
+    if (location.hash === `#/prep/${exam.id}`) render(); else location.hash = `#/prep/${exam.id}`;
+  };
 
   function pick(i) {
     const q = order[index];
@@ -1440,12 +1463,13 @@ async function showTest(exam, only = null) {
       h('div', { class: 'quiz-actions' },
         h('button', {
           type: 'button', class: 'link',
-          onclick: () => { if (!answeredCount() || confirm('Вийти з тесту? Відповіді не збережуться.')) backToExam(); },
+          onclick: () => { if (leaveGuard()) backToExam(); },
         }, 'Вийти'),
         answered ? h('button', { type: 'button', class: 'quiz-next', onclick: next }, last ? 'Результати' : 'Наступне питання') : null));
   }
 
   async function finish() {
+    finished = true;
     const detail = practice ? null : await act(() => api('POST', `/api/exams/${exam.id}/test`, { answers }));
     const right = correctCount();
     const pct = order.length ? Math.round((right / order.length) * 100) : 0;
@@ -1490,6 +1514,11 @@ async function showTest(exam, only = null) {
         ? 'Лише питання, на які ви відповіли неправильно. Результат не зберігається.'
         : 'Відповідайте чесно: мета в тому, щоб знайти, чого ви ще не знаєте.')),
     root);
+  // The test has its own address, so Back leaves it through the guard instead of silently.
+  guardHash = `#/prep/${exam.id}/test`;
+  setHashQuietly(guardHash);
+  // quiet: the browser asks on its own when the tab closes; a confirm() is not allowed there.
+  leaveGuard = (quiet) => finished || !answeredCount() || (!quiet && confirm('Вийти з тесту? Відповіді не збережуться.'));
   if (order.length) draw();
   else root.replaceChildren(h('p', { class: 'muted' }, 'У цього екзамену ще немає питань.'));
   window.scrollTo(0, 0);
