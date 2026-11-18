@@ -38,23 +38,30 @@ function tzOffset(utcMs, timeZone) {
   return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - utcMs;
 }
 
+// Moodle at UCU is in Kyiv: a date without a zone (an all-day deadline, a floating time) is Kyiv time,
+// whatever time zone the server process runs in.
+const HOME_ZONE = 'Europe/Kyiv';
+function inZone(wall, zone) {
+  const guess = wall - tzOffset(wall, zone);
+  return wall - tzOffset(guess, zone);
+}
+
 export function parseIcsDate(value, params = {}) {
   const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(String(value).trim());
   if (!m) return null;
   const [y, mo, d, h, mi, s] = m.slice(1, 7).map((x) => (x === undefined ? undefined : Number(x)));
   // An all-day deadline is due at the end of that day.
-  if (h === undefined) return new Date(y, mo - 1, d, 23, 59, 0).getTime();
+  if (h === undefined) return inZone(Date.UTC(y, mo - 1, d, 23, 59, 0), HOME_ZONE);
   const wall = Date.UTC(y, mo - 1, d, h, mi, s);
   if (m[7]) return wall;
   if (params.TZID) {
     try {
-      const guess = wall - tzOffset(wall, params.TZID);
-      return wall - tzOffset(guess, params.TZID);
+      return inZone(wall, params.TZID);
     } catch {
-      // Unknown zone name (e.g. a Windows one): treat as local time below.
+      // Unknown zone name (e.g. a Windows one): treat as Kyiv time below.
     }
   }
-  return new Date(y, mo - 1, d, h, mi, s).getTime();
+  return inZone(wall, HOME_ZONE);
 }
 
 function toDeadline(props) {
@@ -62,7 +69,7 @@ function toDeadline(props) {
   const dueAt = parseIcsDate(props.DTSTART.value, props.DTSTART.params);
   if (dueAt === null) return null;
   const text = (name) => (props[name] ? unescapeText(props[name].value) : '');
-  const title = text('SUMMARY').trim() || 'Untitled';
+  const title = text('SUMMARY').trim() || 'Без назви';
   const description = text('DESCRIPTION');
   const course = props.CATEGORIES
     ? unescapeText(props.CATEGORIES.value.split(/(?<!\\),/)[0]).trim()

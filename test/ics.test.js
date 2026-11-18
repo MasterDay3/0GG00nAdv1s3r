@@ -45,7 +45,7 @@ test('parses Moodle events with course, title, link and UTC due time', () => {
 test('handles LF line endings, all-day dates and missing UID or link', () => {
   const ics = 'BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Essay\nDTSTART;VALUE=DATE:20261201\nEND:VEVENT\nEND:VCALENDAR\n';
   const [essay] = parseIcs(ics);
-  assert.equal(essay.dueAt, new Date(2026, 11, 1, 23, 59, 0).getTime());
+  assert.equal(essay.dueAt, Date.UTC(2026, 11, 1, 21, 59, 0), 'end of that day in Kyiv (UTC+2 in December)');
   assert.equal(essay.url, '');
   assert.equal(essay.course, '');
   assert.ok(essay.uid.length > 0);
@@ -63,10 +63,18 @@ test('skips events without a usable start date and ignores non-http links', () =
   assert.equal(events[0].url, '');
 });
 
-test('parseIcsDate falls back to local time for an unknown time zone', () => {
+test('parseIcsDate falls back to Kyiv time for an unknown time zone', () => {
   assert.equal(
     parseIcsDate('20261120T100000', { TZID: 'Not/AZone' }),
-    new Date(2026, 10, 20, 10, 0, 0).getTime(),
+    Date.UTC(2026, 10, 20, 8, 0, 0),
   );
   assert.equal(parseIcsDate('2026-11-20'), null);
+});
+
+test('ics: all-day and floating times are Kyiv time whatever the process time zone', async () => {
+  const { parseIcsDate } = await import('../src/ics.js');
+  // 20 Nov 2026 is winter time in Kyiv (UTC+2); 1 Jul 2026 is summer time (UTC+3).
+  assert.equal(parseIcsDate('20261120'), Date.UTC(2026, 10, 20, 21, 59));
+  assert.equal(parseIcsDate('20260701T120000'), Date.UTC(2026, 6, 1, 9, 0));
+  assert.equal(parseIcsDate('20261120T100000Z'), Date.UTC(2026, 10, 20, 10, 0));
 });
