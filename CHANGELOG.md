@@ -29,6 +29,9 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `ui`: New exam: the Course field suggests the full names of your Moodle courses, and fills itself from the exam name (e.g. «Матаналіз», «ООП», «АСД»); you can still type anything.
+- `api`: Optional exam theme (what the exam covers), set when creating or editing an exam; AI questions keep to it.
+- `db`: `exams.theme` column.
 - `api`: Download all your data (deadlines, notes, exams, questions, test results) as one JSON file from Settings → Account.
 - `api`: The morning Telegram digest also says what to study today for each coming exam, following its day-by-day plan; it comes on study days even when nothing is due that week.
 - `api`: Choose when Telegram reminders come: 3 days, 1 day and/or 3 hours before (Settings → Telegram); only the closest one is sent if several are due at once.

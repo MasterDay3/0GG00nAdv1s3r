@@ -496,7 +496,7 @@ export function createApp({
       const questions = examQuestions(exam.id);
       const problems = all('SELECT p.* FROM problems p JOIN topics t ON t.id = p.topic_id WHERE t.exam_id = ? ORDER BY p.id', exam.id);
       return {
-        id: exam.id, title: exam.title, course: exam.course, examAt: iso(exam.exam_at), note: notes.get(`e${exam.id}`) || '',
+        id: exam.id, title: exam.title, course: exam.course, theme: exam.theme, examAt: iso(exam.exam_at), note: notes.get(`e${exam.id}`) || '',
         topics: topics.map((t) => ({
           id: t.id,
           name: t.name,
@@ -802,20 +802,42 @@ export function createApp({
     };
   }
 
+  // The theme is optional and only changes when the request sends it, so older clients keep it as it was.
+  const themeOf = (body) => (body.theme === undefined ? undefined : text(body.theme, 'Тема екзамену', { max: 1000, required: false }));
+  function saveTheme(examId, theme) {
+    if (theme !== undefined) run('UPDATE exams SET theme = ? WHERE id = ?', theme, examId);
+  }
+
+  // Full course names the student already has (Moodle, own and group deadlines, exams), for the course field hints.
+  route('GET', '/api/courses', ({ user }) => all(
+    `SELECT course FROM deadlines
+     WHERE removed_at IS NULL AND course != '' AND (owner_user_id = ? OR (group_id IS NOT NULL AND group_id = ?))
+     UNION SELECT course FROM exams WHERE user_id = ? AND course != ''
+     ORDER BY course`,
+    user.id, user.group_id ?? -1, user.id,
+  ).map((r) => r.course));
+
   route('POST', '/api/exams', ({ user, body }) => {
     const { title, course, examAt } = examFields(body);
+    const theme = themeOf(body);
     const { lastInsertRowid } = run('INSERT INTO exams (user_id, course, title, exam_at) VALUES (?, ?, ?, ?)', user.id, course, title, examAt);
+    saveTheme(Number(lastInsertRowid), theme);
     return { id: Number(lastInsertRowid) };
   });
 
-  route('GET', '/api/exams/:id', ({ user, params }) => ({
-    ...withAi(examDetail(ownExam(user, params.id))),
-    storage: { used: storageUsed(user), limit: storageLimit },
-  }));
+  route('GET', '/api/exams/:id', ({ user, params }) => {
+    const exam = ownExam(user, params.id);
+    return {
+      ...withAi(examDetail(exam)),
+      theme: exam.theme,
+      storage: { used: storageUsed(user), limit: storageLimit },
+    };
+  });
 
   route('PUT', '/api/exams/:id', ({ user, params, body }) => {
     const exam = ownExam(user, params.id);
     const { title, course, examAt } = examFields(body);
+    saveTheme(exam.id, themeOf(body));
     run('UPDATE exams SET title = ?, course = ?, exam_at = ? WHERE id = ?', title, course, examAt, exam.id);
     if (examAt !== exam.exam_at) run('DELETE FROM reminders_sent WHERE item_key = ?', `e${exam.id}`);
     return { ok: true };
@@ -1032,6 +1054,7 @@ export function createApp({
     try {
       result = await ai.generateQuestions({
         examTitle: exam.title,
+        examTheme: exam.theme,
         count,
         topics: topics.map((t) => ({ ...t, existing: existing.filter((q) => q.topicId === t.id).map((q) => q.prompt) })),
         materials,

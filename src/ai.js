@@ -258,7 +258,8 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
   };
 
   // count: how many questions; topics: the exam's topics so far, [{ name, existing: [prompt] }]; materials: [{ id, filename, data }]
-  async function generateQuestions({ examTitle, count = COUNT.default, topics = [], materials }) {
+  // examTheme: what the exam covers in the student's words (may be empty).
+  async function generateQuestions({ examTitle, examTheme = '', count = COUNT.default, topics = [], materials }) {
     if (!apiKey) throw new HttpError(503, 'AI-питання на цьому сервері не налаштовані (немає AI_API_KEY)');
     const { blocks, slideCount, skipped } = materialBlocks(materials);
     if (!blocks.length) throw new HttpError(400, 'Жоден із завантажених файлів не читається. Завантажте слайди як PDF або PPTX.');
@@ -266,7 +267,10 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
       `- ${t.name}`,
       ...t.existing.map((p) => `    already has: ${p.slice(0, 200).replace(/\s+/g, ' ')}`),
     ].join('\n')).join('\n');
-    const task = `Exam: ${examTitle}\n\nWrite ${count} questions.\n\n`
+    const theme = examTheme.trim()
+      ? `The student says the exam covers: ${examTheme.trim()}\nKeep the questions to this; skip material outside it.\n\n`
+      : '';
+    const task = `Exam: ${examTitle}\n\n${theme}Write ${count} questions.\n\n`
       + (topicList ? `The student's topics so far:\n${topicList}` : 'The student has no topics yet: name them from the materials.');
 
     const text = await ask[provider](blocks, task);
