@@ -458,3 +458,17 @@ p:has(> .status-ok) { display: flex; flex-wrap: wrap; align-items: center; gap: 
 .setting-body .export + details { margin-top: var(--space-md); }
 .topic > .head { align-items: center; }
 .storage { margin-bottom: var(--space-sm); }
+
+/* course field: suggestions that match in any case */
+.course-field { position: relative; }
+.course-suggest {
+  position: absolute; z-index: var(--z-dropdown); top: calc(100% - var(--space-2xs)); left: 0; right: 0; max-height: 300px; overflow-y: auto;
+  display: grid; padding: var(--space-2xs); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-lift);
+}
+.course-suggest[hidden] { display: none; }
+button.course-suggest-item {
+  justify-content: flex-start; min-height: 36px; padding: var(--space-2xs) var(--space-sm); text-align: left; white-space: normal;
+  font-weight: 400; color: var(--color-ink); background: transparent; border: none; box-shadow: none;
+}
+button.course-suggest-item:hover, button.course-suggest-item.active { background: var(--color-accent-soft); }
