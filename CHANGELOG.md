@@ -76,6 +76,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `ui`: Course hints no longer depend on capital letters: the Course field suggests matches in any case, any apostrophe and anywhere in the name (its own list instead of the browser's, which in Safari matched only exact case from the start), and abbreviations like «асд» or «ооад» guess the course like «АСД».
 - `ui`: Design audit: on a phone the deadline title gets the full width (it was squeezed to a few letters per line); the time column fits "через 11 днів"; no orange box around the page heading after each navigation; text fields are as tall as the buttons beside them; the exam form has room between fields; the exam list date stays on one line; task boxes inside exam panels are a tinted well, not a second card; "Download all my data" is a real button.
 - `ui`: The test has its own address (`#/prep/<id>/test`): Back, the menu or closing the tab asks before dropping answers already given, instead of leaving silently.
 - `api`: A Moodle assignment that leaves the feed is hidden, not deleted: when the teacher shows it again it comes back with your note and done mark; after 60 days hidden it is removed.

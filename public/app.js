@@ -976,8 +976,8 @@ function wordMatchesCourse(word, raw, courseWords) {
       if (long[k].startsWith(left) && long[k + 1].startsWith(right.slice(0, 4))) return true;
     }
   }
-  // Capital-letter abbreviations: "ООП", "ТЙМС".
-  if (/^[\p{Lu}]{2,6}$/u.test(raw)) {
+  // Abbreviations: "ООП", "ТЙМС", typed in capitals or not ("асд" is "АСД").
+  if (/^\p{L}{2,6}$/u.test(raw) && !SMALL_WORDS.has(word)) {
     const initials = long.map((w) => w[0]).join('');
     if (initials.startsWith(word)) return true;
   }
@@ -997,9 +997,58 @@ function guessCourse(title, courses) {
 }
 
 // Course input with the student's full course names as suggestions; fills itself from the exam name until the student types in it.
+// Course names compared the way a student types them: any case, any apostrophe, words in any order and anywhere.
+const courseKey = (s) => s.toLowerCase().replace(/[ʼ'’`ʹ]/g, '').replace(/\s+/g, ' ').trim();
+function matchCourses(query, courses) {
+  const parts = courseKey(query).split(' ').filter(Boolean);
+  if (!parts.length) return courses;
+  return courses.filter((c) => parts.every((p) => courseKey(c).includes(p)));
+}
+
+// Our own suggestion list instead of <datalist>: Safari filters a datalist case-sensitively and only from the start.
+function courseSuggestions(input, courses) {
+  const list = h('div', { class: 'course-suggest', role: 'listbox', hidden: true });
+  let items = [];
+  let active = -1;
+  const choose = (c) => {
+    input.value = c;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    close();
+  };
+  const close = () => { list.hidden = true; active = -1; };
+  const show = () => {
+    items = matchCourses(input.value, courses).filter((c) => c !== input.value).slice(0, 8);
+    active = -1;
+    list.replaceChildren(...items.map((c, i) => h('button', {
+      type: 'button', class: 'course-suggest-item', role: 'option', tabindex: '-1',
+      onmousedown: (e) => e.preventDefault(), // keep the focus in the field, so blur does not close the list first
+      onclick: () => choose(c), 'data-i': String(i),
+    }, c)));
+    list.hidden = !items.length;
+  };
+  const mark = () => list.querySelectorAll('.course-suggest-item').forEach((b, i) => b.classList.toggle('active', i === active));
+  input.addEventListener('focus', show);
+  input.addEventListener('input', (e) => { if (e.isTrusted) show(); });
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden) { if (e.key === 'ArrowDown') { show(); e.preventDefault(); } return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      mark();
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      choose(items[active]);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  return list;
+}
+
 function courseField(titleInput, courses, value = '') {
-  const id = `courses-${Math.random().toString(36).slice(2, 8)}`;
-  const input = h('input', { name: 'course', maxlength: 100, value, list: id, autocomplete: 'off', placeholder: courses.length ? 'почніть вводити або оберіть' : '' });
+  const input = h('input', { name: 'course', maxlength: 100, value, autocomplete: 'off', placeholder: courses.length ? 'почніть вводити або оберіть' : '' });
   const hint = h('span', { class: 'muted small', hidden: true }, 'Підказано за назвою екзамену, можна змінити');
   let guessed = value ? null : '';
   titleInput.addEventListener('input', () => {
@@ -1009,7 +1058,7 @@ function courseField(titleInput, courses, value = '') {
     hint.hidden = !guessed;
   });
   input.addEventListener('input', () => { guessed = null; hint.hidden = true; });
-  return h('label', {}, 'Курс', input, h('datalist', { id }, courses.map((c) => h('option', { value: c }))), hint);
+  return h('label', { class: 'course-field' }, 'Курс', input, courseSuggestions(input, courses), hint);
 }
 
 function themeField(value = '') {
