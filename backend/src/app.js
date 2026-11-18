@@ -1215,7 +1215,7 @@ export function createApp({
   async function serveStatic(pathname, res) {
     const file = STATIC[pathname];
     if (!file) throw new HttpError(404, 'Не знайдено');
-    const body = await readFile(new URL(`../public/${file[0]}`, import.meta.url));
+    const body = await readFile(new URL(`../../frontend/web/${file[0]}`, import.meta.url));
     res.writeHead(200, { 'content-type': file[1], 'cache-control': 'no-cache' });
     res.end(body);
   }

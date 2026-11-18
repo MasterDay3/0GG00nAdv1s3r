@@ -680,7 +680,7 @@ function syncMoodle() {
 function extensionCard() {
   const steps = h('ol', { class: 'small' },
     h('li', {}, 'Відкрийте ', h('span', { class: 'code' }, 'chrome://extensions'), ' і ввімкніть режим розробника (праворуч угорі).'),
-    h('li', {}, 'Натисніть «Load unpacked» і виберіть папку ', h('span', { class: 'code' }, 'extension'), ' цього проєкту.'),
+    h('li', {}, 'Натисніть «Load unpacked» і виберіть папку ', h('span', { class: 'code' }, 'frontend/extension'), ' цього проєкту.'),
     h('li', {}, 'Перезавантажте цю сторінку й натисніть «Під’єднати розширення».'));
   const intro = h('p', { class: 'muted small' },
     'Moodle УКУ блокує сервери перевіркою на бота, тож Dueboard не може сам завантажити ваш календар. '
@@ -747,7 +747,7 @@ async function showSettings(seq) {
     },
   },
   h('label', {}, 'Посилання на календар Moodle',
-    h('input', { name: 'icsUrl', type: 'text', value: me.icsUrl, placeholder: 'https://moodle.ucu.edu.ua/calendar/export_execute.php?…' })),
+    h('input', { name: 'icsUrl', type: 'text', value: me.icsUrl, placeholder: 'https://learn.ucu.edu.ua/calendar/export_execute.php?…' })),
   h('div', { class: 'row' },
     h('span', { class: 'muted small' }, me.lastSyncAt ? `Остання синхронізація: ${fmtDate(me.lastSyncAt)}.` : 'Ще не синхронізовано.',
       me.syncError ? h('span', { class: 'sync-error' }, ` Остання спроба не вдалася: ${me.syncError}`) : null),

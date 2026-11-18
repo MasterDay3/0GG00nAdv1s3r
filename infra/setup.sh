@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Installs or updates Dueboard on a fresh Ubuntu 24.04 server (AWS Lightsail / EC2). Safe to re-run.
+#
+#   sudo SITE_ADDRESS=dueboard.xyz bash infra/setup.sh   # with a domain: HTTPS via Let's Encrypt
+#   sudo bash infra/setup.sh                             # no domain yet: plain HTTP on the server's IP
+#
+# Optional: BRANCH (default main), COMMIT (a commit on it; default its latest), REPO (default the GitHub repo).
+# It also turns on auto-deploy: infra/autodeploy.sh checks GitHub every minute and deploys new commits.
+# Settings live in /etc/dueboard.env (kept between runs; put TELEGRAM_BOT_TOKEN there).
+set -euo pipefail
+
+REPO="${REPO:-https://github.com/MasterDay3/0GG00nAdv1s3r.git}"
+BRANCH="${BRANCH:-main}"
+APP_DIR=/opt/dueboard
+DATA_DIR=/var/lib/dueboard
+ENV_FILE=/etc/dueboard.env
+export DEBIAN_FRONTEND=noninteractive
+
+[ "$(id -u)" = 0 ] || { echo "Run as root (sudo)"; exit 1; }
+
+# One deploy at a time: a manual run waits for auto-deploy (which already holds the lock when it calls this script).
+STATE_DIR=/var/lib/dueboard-autodeploy
+# Called by auto-deploy (even an older copy of it, which does not set the variable), the lock is already held
+# through the inherited descriptor 9; taking it again here would wait forever.
+if [ "$(readlink "/proc/$$/fd/9" 2>/dev/null)" = /run/dueboard-autodeploy.lock ]; then DUEBOARD_DEPLOY_LOCKED=1; fi
+if [ -z "${DUEBOARD_DEPLOY_LOCKED:-}" ]; then
+  exec 9>/run/dueboard-autodeploy.lock
+  flock 9
+  install -d -m 700 "$STATE_DIR"
+  # A manual run on another branch or a pinned commit is kept: auto-deploy leaves it alone until a plain run.
+  if [ "$BRANCH" != main ] || [ -n "${COMMIT:-}" ]; then
+    echo "${COMMIT:-$BRANCH}" > "$STATE_DIR/pinned"
+    echo "Pinned: auto-deploy is paused until setup.sh runs again without BRANCH or COMMIT."
+  else
+    rm -f "$STATE_DIR/pinned"
+  fi
+fi
+
+# 1 GB swap: the smallest plan has only 512 MB RAM.
+if ! swapon --show | grep -q /swapfile; then
+  fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  grep -q /swapfile /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+# Node.js 22 (node:sqlite needs 22.13+) and Caddy (HTTPS reverse proxy).
+if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
+if ! command -v caddy >/dev/null; then
+  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list
+  apt-get update && apt-get install -y caddy
+fi
+# Skipped when present: a held dpkg lock (unattended upgrades) must not fail every deploy.
+dpkg -s git sqlite3 >/dev/null 2>&1 || apt-get install -y git sqlite3
+
+id dueboard >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin dueboard
+install -d -o dueboard -g dueboard -m 750 "$DATA_DIR"
+
+if [ -d "$APP_DIR/.git" ]; then
+  git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
+else
+  git clone --quiet --branch "$BRANCH" "$REPO" "$APP_DIR"
+fi
+git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "${COMMIT:-origin/$BRANCH}"
+
+if [ ! -f "$ENV_FILE" ]; then
+  cat > "$ENV_FILE" <<ENV
+PORT=3000
+HOST=127.0.0.1
+DB_PATH=$DATA_DIR/dueboard.db
+COOKIE_SECURE=0
+TELEGRAM_BOT_TOKEN=
+TEAM_CHAT_ID=
+AI_PROVIDER=
+AI_API_KEY=
+ENV
+fi
+# Every run, not only the first: the file holds the bot token and the AI key.
+chmod 640 "$ENV_FILE" && chgrp dueboard "$ENV_FILE"
+
+# Caddy: a domain gets automatic HTTPS; without one, serve HTTP on port 80.
+if [ -n "${SITE_ADDRESS:-}" ]; then
+  sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=1/' "$ENV_FILE"
+  SITE="$SITE_ADDRESS"
+elif grep -q '^# site: ' /etc/caddy/Caddyfile 2>/dev/null; then
+  SITE="$(sed -n 's/^# site: //p' /etc/caddy/Caddyfile)"
+else
+  SITE=":80"
+fi
+# The first address serves the app; any others (e.g. www.) redirect to it, so there is one login cookie.
+PRIMARY="$(echo "$SITE" | cut -d, -f1 | xargs)"
+{
+  echo "# site: $SITE"
+  printf '%s {\n\tencode gzip\n\treverse_proxy 127.0.0.1:3000\n}\n' "$PRIMARY"
+  for alias in $(echo "$SITE" | cut -s -d, -f2- | tr ',' ' '); do
+    printf '%s {\n\tredir https://%s{uri} permanent\n}\n' "$alias" "$PRIMARY"
+  done
+} > /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+install -m 644 "$APP_DIR/infra/dueboard.service" /etc/systemd/system/dueboard.service
+# install writes a new file, so a copy of the script that is running right now is not changed under it.
+install -m 755 "$APP_DIR/infra/autodeploy.sh" /usr/local/bin/dueboard-autodeploy
+install -m 644 "$APP_DIR/infra/dueboard-autodeploy.service" "$APP_DIR/infra/dueboard-autodeploy.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now dueboard caddy dueboard-autodeploy.timer
+systemctl restart dueboard
+systemctl reload caddy || systemctl restart caddy
+
+echo "Dueboard $(git -C "$APP_DIR" rev-parse --short HEAD) is running behind Caddy at: $SITE"

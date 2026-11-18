@@ -63,8 +63,11 @@ healthy() {
   return 1
 }
 
+# Where a commit keeps its setup.sh: infra/ now, deploy/ in commits from before the repository was reorganised.
+setup_of() { if [ -f "$1/infra/setup.sh" ]; then echo "$1/infra/setup.sh"; else echo "$1/deploy/setup.sh"; fi; }
+
 # setup.sh from the new commit, run from the scratch copy so it is never edited while it runs.
-if BRANCH="$BRANCH" COMMIT="$target" bash "$work/deploy/setup.sh" && healthy; then
+if BRANCH="$BRANCH" COMMIT="$target" bash "$(setup_of "$work")" && healthy; then
   rm -f "$STATE_DIR/tries"
   echo "Deployed $short"
   exit 0
@@ -84,7 +87,7 @@ fi
 # Roll back with the previous commit's own setup.sh, so its unit files, this script and Caddy come back too.
 echo "Rolling back to ${current:0:7}"
 git -C "$APP_DIR" archive "$current" | tar -x -C "$old"
-if BRANCH="$BRANCH" COMMIT="$current" bash "$old/deploy/setup.sh" && healthy; then
+if BRANCH="$BRANCH" COMMIT="$current" bash "$(setup_of "$old")" && healthy; then
   echo "Rolled back to ${current:0:7}"
 else
   git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "$current"
