@@ -233,7 +233,7 @@ export function createApp({
       `SELECT d.*, n.text AS note, dn.done_at FROM deadlines d
        LEFT JOIN notes n ON n.user_id = ? AND n.item_key = 'd' || d.id
        LEFT JOIN done dn ON dn.user_id = ? AND dn.item_key = 'd' || d.id
-       WHERE d.owner_user_id = ? OR (d.group_id IS NOT NULL AND d.group_id = ?)`,
+       WHERE d.removed_at IS NULL AND (d.owner_user_id = ? OR (d.group_id IS NOT NULL AND d.group_id = ?))`,
       user.id, user.id, user.id, user.group_id ?? -1,
     ).map((d) => ({
       key: `d${d.id}`, id: d.id, source: d.source, course: d.course, title: d.title, url: d.url,
@@ -261,7 +261,7 @@ export function createApp({
       `INSERT INTO deadlines (owner_user_id, created_by, source, uid, course, title, url, due_at)
        VALUES (?, ?, 'moodle', ?, ?, ?, ?, ?)
        ON CONFLICT (owner_user_id, uid) DO UPDATE SET
-         course = excluded.course, title = excluded.title, due_at = excluded.due_at,
+         course = excluded.course, title = excluded.title, due_at = excluded.due_at, removed_at = NULL,
          url = CASE WHEN excluded.url = '' THEN deadlines.url ELSE excluded.url END`,
     );
     const existing = db.prepare('SELECT id, due_at FROM deadlines WHERE owner_user_id = ? AND uid = ?');
@@ -280,9 +280,11 @@ export function createApp({
       // An empty feed is more likely a glitch than every assignment gone: then nothing (and no note) is deleted.
       if (origin && events.length) {
         const uids = new Set(events.map((e) => e.uid.slice(0, 500)));
-        const stale = all(`SELECT id, uid FROM deadlines WHERE owner_user_id = ? AND source = 'moodle' AND due_at > ?`, user.id, t)
-          .filter((d) => !uids.has(d.uid));
-        for (const d of stale) forgetDeadline(d.id);
+        const stale = all(
+          `SELECT id, uid FROM deadlines WHERE owner_user_id = ? AND source = 'moodle' AND due_at > ? AND removed_at IS NULL`, user.id, t,
+        ).filter((d) => !uids.has(d.uid));
+        // Hidden, not deleted: a teacher who hides an assignment for a while brings it back with the student's note.
+        for (const d of stale) run('UPDATE deadlines SET removed_at = ? WHERE id = ?', t, d.id);
       }
       db.exec('COMMIT');
     } catch (err) {
@@ -1256,6 +1258,8 @@ export function createApp({
   // Hourly housekeeping: rows that only ever grow and are no longer needed.
   function cleanup() {
     const t = now();
+    // A Moodle deadline hidden for 60 days is not coming back: now it goes, with its notes and marks.
+    for (const { id } of all('SELECT id FROM deadlines WHERE removed_at IS NOT NULL AND removed_at <= ?', t - 60 * DAY)) forgetDeadline(id);
     run('DELETE FROM sessions WHERE expires_at <= ?', t);
     run('DELETE FROM ai_runs WHERE created_at <= ?', t - DAY);
     run('UPDATE users SET reset_hash = NULL, reset_expires = NULL, reset_tries = 0 WHERE reset_expires <= ?', t);

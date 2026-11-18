@@ -119,6 +119,9 @@ export function openDb(path = ':memory:') {
   // Which Telegram reminders the user wants, e.g. "3d,1d,3h" (NULL: the default 3 days and 1 day).
   if (!userColumns.includes('tg_remind')) db.exec('ALTER TABLE users ADD COLUMN tg_remind TEXT');
   // Which questions a diagnostic attempt got wrong (JSON array of ids), for "practise your mistakes".
+  // A Moodle deadline that left the feed is hidden, not deleted, so its notes and done mark come back with it.
+  const deadlineColumns = db.prepare('PRAGMA table_info(deadlines)').all().map((c) => c.name);
+  if (!deadlineColumns.includes('removed_at')) db.exec('ALTER TABLE deadlines ADD COLUMN removed_at INTEGER');
   const attemptColumns = db.prepare('PRAGMA table_info(attempts)').all().map((c) => c.name);
   if (!attemptColumns.includes('wrong')) db.exec("ALTER TABLE attempts ADD COLUMN wrong TEXT NOT NULL DEFAULT '[]'");
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_ext_key ON users (ext_key_hash)');

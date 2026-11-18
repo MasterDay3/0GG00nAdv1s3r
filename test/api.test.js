@@ -1004,3 +1004,46 @@ test('audit: wrong reset codes add up across new codes', async (t) => {
   const res = await anon('POST', '/api/password-reset/confirm', { username: 'mykola', code, password: 'battery staple' });
   assert.equal(res.status, 429, 'ten wrong codes in a day lock resets until tomorrow, even with the right new code');
 });
+
+test('moodle: an assignment hidden for a while comes back with its note and done mark', async (t) => {
+  let clock = NOW;
+  const other = [
+    'BEGIN:VEVENT', 'UID:2@moodle.example', 'SUMMARY:Quiz 4', `DTSTART:${icsStamp(NOW + 5 * DAY)}`, 'END:VEVENT',
+  ].join('\r\n');
+  const both = FEED.replace('END:VCALENDAR', `${other}\r\nEND:VCALENDAR`);
+  const onlyQuiz = `BEGIN:VCALENDAR\r\n${other}\r\nEND:VCALENDAR`;
+  let feed = both;
+  const { app, base, close } = await start({ now: () => clock, fetchImpl: async () => new Response(feed) });
+  t.after(close);
+  const call = await signedUp(base, 'mykola');
+  await call('PUT', '/api/settings', { icsUrl: 'https://moodle.example/cal.ics' });
+  await call('POST', '/api/sync', {});
+  const lab = (await call('GET', '/api/deadlines')).data.items.find((i) => i.title === 'Lab 3 is due');
+  await call('PUT', '/api/notes', { key: lab.key, text: 'Bring the dataset' });
+  await call('PUT', '/api/done', { key: lab.key, done: true });
+
+  feed = onlyQuiz; // the teacher hides the lab
+  await call('POST', '/api/sync', {});
+  assert.deepEqual((await call('GET', '/api/deadlines')).data.items.map((i) => i.title), ['Quiz 4']);
+
+  feed = both; // and shows it again
+  await call('POST', '/api/sync', {});
+  const back = (await call('GET', '/api/deadlines')).data.items.find((i) => i.title === 'Lab 3 is due');
+  assert.equal(back.key, lab.key, 'the same row comes back');
+  assert.equal(back.note, 'Bring the dataset');
+  assert.equal(back.done, true);
+
+  // Hidden for 60 days: then it is really gone.
+  feed = onlyQuiz;
+  await call('POST', '/api/sync', {});
+  clock += 61 * DAY;
+  app.cleanup();
+  feed = both;
+  clock = NOW;
+  // The cleanup at day 61 also removed the expired session.
+  await call('POST', '/api/login', { username: 'mykola', password: 'correct horse' });
+  await call('POST', '/api/sync', {});
+  const fresh = (await call('GET', '/api/deadlines')).data.items.find((i) => i.title === 'Lab 3 is due');
+  assert.notEqual(fresh.key, lab.key);
+  assert.equal(fresh.note, '');
+});
