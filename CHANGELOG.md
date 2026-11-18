@@ -11,6 +11,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 ## [Unreleased]
 
 ### Security
+- `api`: Exam prep is no longer behind the paywall unless the server sets `PAYWALL=1` (the checkout is a demo, so the paywall took no money but locked students out of their own exams); deleting exams, topics and files never needs Dueboard Prep; orders are limited to 20 an hour.
+- `api`: Deadlines the AI finds in a forwarded message go through the same checks as ones typed on the site (title and link length, link format, a date between 2000 and 2100) and past dates are not offered; at most 3 messages per student are read at once.
 - `api`: A crafted .pptx can no longer freeze the server for hours (slide text is read in linear time).
 - `auth`: A new password revokes the extension key and any pending Telegram link code; "log out everywhere" also turns off the calendar link and unlinks Telegram.
 - `auth`: Wrong password-reset codes add up across codes (10 a day per account), so asking for new codes no longer buys new guesses.
@@ -84,6 +86,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `ui`: The guest page lists its points without emoji; the Dueboard Prep panel lists its features as a ruled list instead of cards in a card; the "why" note after a wrong answer has no side stripe; no long dashes on the checkout.
 - `api`: Gemini: a busy model falls back to the other Gemini model, each attempt waits up to 150 s instead of hanging for 5 minutes, and keys starting with `AQ.` are recognised as Gemini keys.
 - `api`: AI questions from files without slides (DOCX, TXT, MD) are kept instead of dropped.
 - `api`: The data export leaves out the Moodle calendar link, includes exam notes and ids, and downloads more safely.

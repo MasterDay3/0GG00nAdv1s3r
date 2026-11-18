@@ -18,8 +18,8 @@ const ai = createAi(aiConfigFromEnv(process.env));
 const storageMb = Number(process.env.STORAGE_MB_PER_USER) || 100;
 const app = createApp({
   db: openDb(DB_PATH), telegram, ai, secureCookies: process.env.COOKIE_SECURE === '1', storageLimit: storageMb * 1024 * 1024,
-  // Exam prep is the paid package (demo payments); PAYWALL=0 opens it to everyone.
-  paywall: process.env.PAYWALL !== '0',
+  // Exam prep as a paid package (demo payments, test cards only): off unless PAYWALL=1, since no real payment is wired.
+  paywall: process.env.PAYWALL === '1',
   // The team's Telegram chat: /support questions from students arrive there.
   teamChatId: process.env.TEAM_CHAT_ID || null,
 });

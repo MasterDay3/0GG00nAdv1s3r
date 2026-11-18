@@ -43,13 +43,23 @@ test('paywall: exam prep needs Dueboard Prep, the board stays free', async (t) =
   const call = await student(client);
   const me = (await call('GET', '/api/me')).data.premium;
   assert.deepEqual(me, { required: true, active: false, until: null, price: 149, days: 30 });
-  for (const [method, path, body] of [['GET', '/api/exams'], ['POST', '/api/exams', { title: 'x', examAt: Date.now() + DAY }], ['GET', '/api/exams/1/test'], ['DELETE', '/api/topics/1']]) {
+  for (const [method, path, body] of [['GET', '/api/exams'], ['POST', '/api/exams', { title: 'x', examAt: Date.now() + DAY }], ['GET', '/api/exams/1/test'], ['PUT', '/api/topics/1', { name: 'x' }]]) {
     const r = await call(method, path, body);
     assert.equal(r.status, 402, `${method} ${path}`);
     assert.match(r.data.error, /Dueboard Prep: 149 грн на 30 днів/);
   }
   assert.equal((await call('GET', '/api/deadlines')).status, 200);
   assert.equal((await call('GET', '/api/courses')).status, 200);
+  // Deleting stays free (the privacy page promises everything can be deleted): no 402, just "not found" here.
+  assert.equal((await call('DELETE', '/api/exams/1')).status, 404);
+});
+
+test('payments: orders are limited to 20 an hour', async (t) => {
+  const { client, close } = await start();
+  t.after(close);
+  const call = await student(client);
+  for (let i = 0; i < 20; i++) assert.equal((await call('POST', '/api/payments', {})).status, 200);
+  assert.equal((await call('POST', '/api/payments', {})).status, 429);
 });
 
 test('payments: a test card pays, 30 days are added on top of the time left, and the order cannot be paid twice', async (t) => {

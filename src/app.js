@@ -231,7 +231,10 @@ export function createApp({
     all('SELECT * FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 50', user.id).map(paymentView));
 
   // An order for one package. Unpaid orders older than a day are dropped, so the list stays short.
-  route('POST', '/api/payments', ({ user }) => {
+  const orderLimit = createLimiter({ limit: 20, windowMs: 60 * MINUTE, now });
+  route('POST', '/api/payments', ({ user, res }) => {
+    guard(res, [orderLimit, `u${user.id}`]);
+    orderLimit.hit(`u${user.id}`);
     run("DELETE FROM payments WHERE user_id = ? AND status = 'pending' AND created_at < ?", user.id, now() - DAY);
     const orderRef = `DB-${new Date(now()).toISOString().slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex').toUpperCase()}`;
     const { lastInsertRowid } = run(
@@ -1217,7 +1220,8 @@ export function createApp({
       );
       const user = match.auth === 'extension' ? extensionUser(req) : currentUser(req);
       if (match.auth && !user) throw new HttpError(401, match.auth === 'extension' ? 'Розширення не під’єднане' : 'Увійдіть у свій акаунт');
-      if (paywall && match.auth === true && PAID_API.test(pathname) && !premiumActive(user)) {
+      // Deleting one's own exams and files stays free: the privacy page promises everything can be deleted.
+      if (paywall && match.auth === true && req.method !== 'DELETE' && PAID_API.test(pathname) && !premiumActive(user)) {
         throw new HttpError(402, `Підготовка до екзаменів входить у Dueboard Prep: ${PREMIUM.price} грн на ${PREMIUM.days} днів.`);
       }
       const wantsBody = ['POST', 'PUT'].includes(req.method) || match.withBody;
@@ -1375,9 +1379,25 @@ export function createApp({
   }
 
   // A message the student forwards (or types): the AI finds the deadlines in it, and each comes back with buttons.
+  // Updates are handled in parallel; a student forwarding a pile of messages gets a few AI reads at a time, not all at once.
+  const MAX_PARSES_AT_ONCE = 3;
+  const parsing = new Map();
+
   async function draftsFromMessage(user, chatId, message, text) {
     const reply = (t, options) => telegram.send(chatId, t, options);
     if (!ai.enabled) return reply('Розпізнавати дедлайни з повідомлень зараз не вийде: AI на сервері не налаштований. Додайте дедлайн на сайті.');
+    const busy = parsing.get(user.id) || 0;
+    if (busy >= MAX_PARSES_AT_ONCE) return reply('Ще читаю попередні повідомлення. Перешліть це ще раз за хвилину.');
+    parsing.set(user.id, busy + 1);
+    try {
+      return await readDrafts(user, chatId, message, text, reply);
+    } finally {
+      const left = (parsing.get(user.id) || 1) - 1;
+      if (left > 0) parsing.set(user.id, left); else parsing.delete(user.id);
+    }
+  }
+
+  async function readDrafts(user, chatId, message, text, reply) {
     const { used } = one('SELECT COUNT(*) AS used FROM ai_parses WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
     if (used >= AI_PARSES_PER_DAY) return reply(`Розібрати можна ${AI_PARSES_PER_DAY} повідомлень на день. Спробуйте завтра або додайте дедлайн на сайті.`);
     run('INSERT INTO ai_parses (user_id, created_at) VALUES (?, ?)', user.id, now());
@@ -1405,14 +1425,27 @@ export function createApp({
         await reply(`Бачу «${d.title}», але не бачу дати. Напишіть, до коли, наприклад: «${d.title} до 25.11 18:00».`);
         continue;
       }
+      if (dueAt <= now()) {
+        await reply(`«${d.title}»: цей термін уже минув. Якщо дата інша, напишіть її, наприклад: «${d.title} до 25.11 18:00».`);
+        continue;
+      }
+      // The AI's answer goes through the same checks as a deadline typed on the site (length, link, date range).
+      let fields;
+      try {
+        fields = deadlineFields({ title: d.title, course: d.course, url: d.url, dueAt });
+      } catch (err) {
+        if (!(err instanceof HttpError)) throw err;
+        await reply(`Не можу додати «${d.title.slice(0, 80)}»: ${err.message}`);
+        continue;
+      }
       const { lastInsertRowid } = run(
         'INSERT INTO tg_drafts (user_id, title, course, url, due_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        user.id, d.title, d.course, d.url, dueAt, now(),
+        user.id, fields.title, fields.course, fields.url, fields.dueAt, now(),
       );
       const id = Number(lastInsertRowid);
       const add = [{ text: '✅ Додати собі', data: `draft:${id}:me` }];
       if (user.group_id) add.push({ text: '👥 Додати групі', data: `draft:${id}:group` });
-      await reply(draftText({ title: d.title, course: d.course, url: d.url, due_at: dueAt }, now()), {
+      await reply(draftText({ title: fields.title, course: fields.course, url: fields.url, due_at: fields.dueAt }, now()), {
         buttons: [add, [{ text: '✖️ Скасувати', data: `draft:${id}:no` }]],
       });
     }

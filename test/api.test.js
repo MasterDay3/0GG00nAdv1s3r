@@ -419,6 +419,37 @@ test('telegram: a forwarded message becomes a deadline after a tap, for me or my
   assert.equal(asked.length, calls);
 });
 
+test('telegram: deadlines the AI finds get the site checks; a pile of forwards is read a few at a time', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ai = {
+    enabled: true,
+    extractDeadlines: async ({ text }) => {
+      if (/повільно/.test(text)) { await gate; return []; }
+      return [
+        { title: 'Минуле есе', course: '', url: '', date: '2020-01-10', time: '' },
+        { title: 'Далеке есе', course: '', url: '', date: '2999-01-10', time: '' },
+      ];
+    },
+  };
+  const { app, base, sent, close } = await start({ ai });
+  t.after(close);
+  const mykola = await signedUp(base, 'mykola');
+  await linkTelegram(app, mykola, 1);
+  sent.length = 0;
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'два есе' } });
+  assert.ok(sent.some((m) => /«Минуле есе»: цей термін уже минув/.test(m.text)), 'a date in the past is not offered');
+  assert.ok(sent.some((m) => /Не можу додати «Далеке есе»/.test(m.text)), 'a date past 2100 is refused like on the site');
+  assert.ok(!sent.some((m) => m.buttons), 'no buttons for either');
+
+  sent.length = 0;
+  const slow = [1, 2, 3].map(() => app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'повільно' } }));
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'повільно' } });
+  assert.match(sent.at(-1).text, /Ще читаю попередні повідомлення/);
+  release();
+  await Promise.all(slow);
+});
+
 test('telegram: group deadline is announced to the other linked members', async (t) => {
   const { app, base, sent, close } = await start();
   t.after(close);

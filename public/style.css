@@ -1,5 +1,5 @@
 /* Hallmark · checked: 2026-11-18 · genre: modern-minimal · shape: app screen
- * floor: 0 FAIL · fixed: 9 (4, 39a, 26a, F17, F14, F12, 72, 49b, F15) · structural: none printed
+ * floor: 0 FAIL · fixed: 13 (4, 39a, 26a, 30a, 3, 19, F17, F14, F12, F6, F24, 72, F15) · structural: none printed
  * built: Hallmark · theme: Furrow · nav: kept top bar, wordmark and four links · signature: the deadline ledger ruled by day, the next one open as a notebook card · redesign: polish · v2.0.0 */
 /* Hallmark · dismissed 40 · the dark block swaps error-soft to a dark fill under light ink, checked in the dark render; the linter paired the light fill with the dark-mode ink */
 /* Hallmark · answered F4 · the right and wrong quiz options are answer feedback fills, not buttons a student presses next; one filled primary per screen otherwise */
@@ -294,7 +294,7 @@ button.quiz-opt.dim { opacity: 0.55; }
 .quiz-feedback.ok { border-color: var(--color-green); background: var(--color-green-soft); }
 .quiz-feedback.bad { border-color: var(--color-error); background: var(--color-error-soft); }
 .quiz-why { width: 100%; margin-top: var(--space-xs); padding-top: var(--space-xs); border-top: var(--rule-hair) solid color-mix(in oklab, var(--color-ink) 15%, transparent); line-height: 1.5; }
-.quiz-card > .quiz-why { padding: var(--space-sm) var(--space-md); margin: 0; border: none; border-left: 3px solid var(--color-accent); border-radius: var(--radius-pill); background: var(--color-paper); }
+.quiz-card > .quiz-why { padding: var(--space-sm) var(--space-md); margin: 0; border: none; border-radius: var(--radius-pill); background: var(--color-paper-3); }
 .why-line { margin: var(--space-2xs) 0 0; }
 .quiz-hint { margin: var(--space-xs) 0 0; font-size: var(--text-sm); color: var(--color-ink-2); }
 .quiz-keys { margin: 0; }
@@ -350,7 +350,8 @@ details.qlist > summary { cursor: pointer; color: var(--color-muted); font-size:
 .landing-intro h1 { font-size: 2.75rem; }
 .landing-intro .tagline { margin-bottom: var(--space-lg); }
 .landing-points { list-style: none; margin: 0 0 var(--space-lg); padding: 0; display: grid; gap: var(--space-sm); }
-.landing-points li { display: flex; gap: var(--space-sm); align-items: baseline; font-size: var(--text-md); }
+.landing-points { gap: 0; border-top: var(--rule-hair) solid var(--color-ink); }
+.landing-points li { padding: var(--space-xs) 0; border-bottom: var(--rule-hair) solid var(--color-rule); font-size: var(--text-md); }
 .landing-tg:empty { display: none; }
 a.button {
   display: inline-flex; align-items: center; justify-content: center; min-height: var(--control); padding: 0 var(--space-md);
@@ -486,8 +487,8 @@ p:has(> .status-ok) { display: flex; flex-wrap: wrap; align-items: center; gap: 
 .course-field { position: relative; }
 .course-suggest {
   position: absolute; z-index: var(--z-dropdown); top: calc(100% - var(--space-2xs)); left: 0; right: 0; max-height: 300px; overflow-y: auto;
-  display: grid; padding: var(--space-2xs); background: var(--color-paper-2); border: var(--rule-hair) solid var(--color-rule);
-  border-radius: var(--radius-card); box-shadow: var(--shadow-lift);
+  display: grid; padding: var(--space-2xs); background: var(--color-paper-2); border: none;
+  border-radius: var(--radius-card); box-shadow: 0 0 0 1px var(--color-rule), var(--shadow-lift);
 }
 .course-suggest[hidden] { display: none; }
 button.course-suggest-item {
@@ -502,11 +503,11 @@ button.course-suggest-item:hover, button.course-suggest-item.active { background
 .plan-head p { margin: 0; }
 .plan-name { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 .plan-price { font-size: var(--text-lg); font-weight: 500; }
-.plan-price .num { font-size: var(--text-3xl); font-weight: 600; letter-spacing: -0.02em; }
-.plan-features { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-sm); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.plan-features li { display: grid; gap: var(--space-3xs); padding: var(--space-sm) var(--space-md) var(--space-sm) calc(var(--space-md) + 22px); position: relative;
-  background: var(--color-paper); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-card); }
-.plan-features li::before { content: "✓"; position: absolute; left: var(--space-sm); top: var(--space-sm); color: var(--color-green); font-weight: 600; }
+.plan-price .num { font-size: var(--text-3xl); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.plan-features { list-style: none; margin: 0; padding: 0; display: grid; gap: 0 var(--space-lg); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* A ruled list inside the plan panel, not a second row of cards. */
+.plan-features li { display: grid; gap: var(--space-3xs); padding: var(--space-xs) 0 var(--space-xs) var(--space-lg); position: relative; border-top: var(--rule-hair) solid var(--color-rule); }
+.plan-features li::before { content: "✓"; position: absolute; left: 0; top: var(--space-xs); color: var(--color-green); font-weight: 600; }
 .plan-actions { align-items: center; gap: var(--space-md); }
 .plan-actions > * { flex: 0 1 auto; }
 

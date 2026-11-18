@@ -294,9 +294,9 @@ function showAuth() {
       h('h1', {}, 'Dueboard'),
       h('p', { class: 'tagline' }, 'Усі дедлайни курсів в одному списку і помічник для підготовки до екзамену.'),
       h('ul', { class: 'landing-points' },
-        h('li', {}, h('span', { 'aria-hidden': 'true' }, '📋'), 'Дедлайни з Moodle і з чатів групи разом'),
-        h('li', {}, h('span', { 'aria-hidden': 'true' }, '⏰'), 'Нагадування в Telegram, поки ще не пізно'),
-        h('li', {}, h('span', { 'aria-hidden': 'true' }, '🎯'), 'AI-тест з ваших слайдів показує слабкі теми')),
+        h('li', {}, 'Дедлайни з Moodle і з чатів групи разом'),
+        h('li', {}, 'Нагадування в Telegram, поки ще не пізно'),
+        h('li', {}, 'AI-тест з ваших слайдів показує слабкі теми')),
       tgSlot),
     h('div', { class: 'auth' },
       h('div', { class: 'panel' }, h('div', { class: 'tabs' }, tabs), form, h('p', { class: 'auth-foot' }, forgot),
@@ -1113,7 +1113,7 @@ async function showCheckout(seq) {
   error,
   submit,
   h('div', { class: 'demo-cards' },
-    h('p', { class: 'muted small' }, 'Тестові картки (строк — будь-який у майбутньому, CVC — будь-які 3 цифри):'),
+    h('p', { class: 'muted small' }, 'Тестові картки. Строк дії будь-який у майбутньому, CVC будь-які 3 цифри.'),
     DEMO_CARDS.map((c) => h('button', { type: 'button', class: 'demo-card', onclick: () => useCard(c) },
       h('span', { class: 'num' }, c.number), h('span', { class: 'muted small' }, c.label)))));
 

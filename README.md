@@ -20,7 +20,7 @@ Environment variables:
 | `DB_PATH` | `data/dueboard.db` | SQLite file |
 | `TELEGRAM_BOT_TOKEN` | — | Turns on the Telegram bot (account linking and reminders 3 days / 1 day ahead) |
 | `COOKIE_SECURE` | `0` | `1` adds `Secure` to the session cookie; set it when the site is served over HTTPS |
-| `PAYWALL` | on | `0` opens exam prep to everyone; otherwise it needs Dueboard Prep (149 грн / 30 days, demo checkout with test cards) |
+| `PAYWALL` | off | `1` puts exam prep behind Dueboard Prep (149 грн / 30 days, demo checkout with test cards, no real money); deleting exams and files stays free |
 | `TEAM_CHAT_ID` | — | Telegram chat of the team: `/support` questions from students arrive there, answer with `/reply <chat id> text`. Add the bot to the chat and send `/chatid` there to get the id |
 | `AI_API_KEY` | — | Turns on AI practice questions generated from uploaded slides. A Claude, Gemini or DeepSeek key (`ANTHROPIC_API_KEY` also works) |
 | `AI_PROVIDER` | from the key | `claude`, `gemini` or `deepseek`. Without it: `sk-ant-…` is Claude, `AIza…` is Gemini, any other key is DeepSeek |
