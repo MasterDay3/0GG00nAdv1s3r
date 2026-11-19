@@ -324,7 +324,7 @@ test('ai: Gemini through the Interactions API, PDF sent inline', async (t) => {
   const r = await call('POST', `/api/exams/${exam.id}/generate`, {});
   assert.equal(r.status, 200);
   assert.equal(r.data.added, 1);
-  assert.deepEqual(requests.map((q) => q.body.model), ['gemini-3-flash-preview', 'gemini-3.8-flash'], 'a busy model falls back');
+  assert.deepEqual(requests.map((q) => q.body.model), ['gemini-3-flash-preview', 'gemini-3.1-flash-lite'], 'a busy model falls back');
   const [req] = requests;
   assert.equal(req.url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
   assert.equal(req.headers['x-goog-api-key'], 'AIza-test');
@@ -390,7 +390,7 @@ test('ai: a model that never answers falls back, and a final timeout is a clear 
   const a = await examWithSlides(ok.call);
   ids = { topic: a.topic.id, material: a.material.id };
   assert.equal((await ok.call('POST', `/api/exams/${a.exam.id}/generate`, { count: 1 })).data.added, 1);
-  assert.deepEqual(models, ['gemini-3-flash-preview', 'gemini-3.8-flash']);
+  assert.deepEqual(models, ['gemini-3-flash-preview', 'gemini-3.1-flash-lite']);
 
   const never = await start(createAi({ provider: 'deepseek', apiKey: 'k', fetchImpl: async () => timeout() }));
   t.after(never.close);

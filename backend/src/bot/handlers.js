@@ -1,6 +1,7 @@
 // What the Telegram bot does with messages and buttons, and messages it sends on its own.
 import { parseReminders } from './reminders.js';
 import { NOT_LINKED, DIGEST_HOUR, deadlinesText, groupDeadlineText, linkedText, helpText, digestOffText, kyivToMs, draftText, FORWARD_HINT } from './texts.js';
+import { parseDeadlineSimply } from './simple-parse.js';
 import { AI_PARSES_PER_DAY, MINUTE } from '../constants.js';
 import { createLimiter } from '../lib/limiter.js';
 import { DAY } from '../lib/urgency.js';
@@ -150,7 +151,6 @@ export function createBotHandlers(ctx) {
 
   async function draftsFromMessage(user, chatId, message, text) {
     const reply = (t, options) => telegram.send(chatId, t, options);
-    if (!ai.enabled) return reply('Розпізнавати дедлайни з повідомлень зараз не вийде: AI на сервері не налаштований. Додайте дедлайн на сайті.');
     const busy = parsing.get(user.id) || 0;
     if (busy >= MAX_PARSES_AT_ONCE) return reply('Ще читаю попередні повідомлення. Перешліть це ще раз за хвилину.');
     parsing.set(user.id, busy + 1);
@@ -163,26 +163,35 @@ export function createBotHandlers(ctx) {
   }
 
   async function readDrafts(user, chatId, message, text, reply) {
-    const { used } = one('SELECT COUNT(*) AS used FROM ai_parses WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
-    if (used >= AI_PARSES_PER_DAY) return reply(`Розібрати можна ${AI_PARSES_PER_DAY} повідомлень на день. Спробуйте завтра або додайте дедлайн на сайті.`);
-    run('INSERT INTO ai_parses (user_id, created_at) VALUES (?, ?)', user.id, now());
     // Relative dates ("до п'ятниці") count from when the message was first sent, not when it was forwarded.
     const sentSeconds = message.forward_origin?.date ?? message.forward_date ?? message.date;
     const sentAt = Number.isFinite(sentSeconds) ? sentSeconds * 1000 : now();
-    // The AI takes a few seconds: say so at once, so the chat does not look dead; the note goes when the answer comes.
-    const reading = await reply('📖 Читаю повідомлення…').catch(() => null);
-    const doneReading = () => reading?.message_id && telegram.deleteMessage?.(chatId, reading.message_id).catch(() => {});
+    const { used } = one('SELECT COUNT(*) AS used FROM ai_parses WHERE user_id = ? AND created_at > ?', user.id, now() - DAY);
+    // Without the AI (not set up, over the daily limit, or Google down) the bot still reads plain dates itself.
+    let simply = !ai.enabled ? 'AI на сервері не налаштований' : used >= AI_PARSES_PER_DAY ? `AI-ліміт на сьогодні (${AI_PARSES_PER_DAY}) вичерпано` : null;
     let found;
-    try {
-      found = await ai.extractDeadlines({ text, sentAt });
-    } catch (err) {
-      doneReading();
-      if (!(err instanceof HttpError)) console.error('Deadline extraction failed:', err);
-      return reply(err instanceof HttpError && [503, 504].includes(err.status)
-        ? 'AI зараз перевантажений і не встиг відповісти. Спробуйте ще раз за хвилину або додайте дедлайн на сайті.'
-        : 'Не вдалося розібрати повідомлення. Спробуйте ще раз за хвилину.');
+    if (!simply) {
+      const parse = run('INSERT INTO ai_parses (user_id, created_at) VALUES (?, ?)', user.id, now());
+      // The AI takes a few seconds: say so at once, so the chat does not look dead; the note goes when the answer comes.
+      const reading = await reply('📖 Читаю повідомлення…').catch(() => null);
+      try {
+        found = await ai.extractDeadlines({ text, sentAt });
+      } catch (err) {
+        if (!(err instanceof HttpError)) console.error('Deadline extraction failed:', err);
+        // The AI's failure does not count against the student's daily limit.
+        run('DELETE FROM ai_parses WHERE rowid = ?', parse.lastInsertRowid);
+        simply = err instanceof HttpError && [503, 504].includes(err.status) ? 'AI зараз перевантажений' : 'AI зараз недоступний';
+      } finally {
+        if (reading?.message_id) telegram.deleteMessage?.(chatId, reading.message_id).catch(() => {});
+      }
     }
-    doneReading();
+    if (simply) {
+      found = parseDeadlineSimply(text, sentAt);
+      if (!found.length) {
+        return reply(`${simply}, а без нього я розумію лише прості дати. Напишіть, наприклад: «лаба з ООП до 25.11 18:00» або «есе до п’ятниці», чи додайте дедлайн на сайті.`);
+      }
+      await reply(`${simply}, тож я прочитав повідомлення простіше. Перевірте назву й дату, перш ніж додати.`);
+    }
     if (!found.length) return reply(`Не знайшов тут дедлайну. ${FORWARD_HINT}`);
     for (const d of found) {
       const dueAt = d.date ? kyivToMs(d.date, d.time || '23:59') : NaN;

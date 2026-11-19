@@ -405,11 +405,17 @@ test('telegram: a forwarded message becomes a deadline after a tap, for me or my
   assert.match(sent.find((m) => m.edited)?.text || '', /Скасовано/);
   assert.equal((await mykola('GET', '/api/deadlines')).data.items.length, before);
 
-  // An AI that does not answer in time: a clear message instead of silence.
+  // An AI that does not answer in time: the bot reads plain dates itself, says so, and the try is not counted.
   ai.extractDeadlines = async () => { const { HttpError } = await import('../src/lib/validate.js'); throw new HttpError(504, 'slow'); };
-  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: 1, text: 'есе до п’ятниці' } });
-  assert.match(sent.at(-1).text, /AI зараз перевантажений/);
-  assert.ok(sent.at(-2).deleted, 'the reading note is removed on failure too');
+  sent.length = 0;
+  const thursday = Math.floor(Date.UTC(2026, 10, 19, 10) / 1000);
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: thursday, text: 'Есе з етики до п’ятниці 18:00' } });
+  assert.ok(sent.some((m) => m.deleted), 'the reading note is removed on failure too');
+  assert.match(sent.at(-2).text, /AI зараз перевантажений, тож я прочитав повідомлення простіше/);
+  assert.match(sent.at(-1).text, /Есе з етики\n.*20 лист.*18:00/s);
+  assert.ok(sent.at(-1).buttons, 'the simply read deadline still waits for a tap');
+  await app.handleTelegramUpdate({ message: { chat: { id: 1, type: 'private' }, date: thursday, text: 'колись потім' } });
+  assert.match(sent.at(-1).text, /без нього я розумію лише прості дати/);
   ai.extractDeadlines = async ({ text, sentAt }) => { asked.push({ text, sentAt }); return []; };
 
   // Group chats and unlinked chats are not read.

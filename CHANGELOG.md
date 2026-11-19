@@ -35,6 +35,7 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: New look (warm paper, ink rules, Red Hat type, light and dark): the board is a ledger grouped by day with the next deadline open as a card, settings sit in labelled rows, exams are a ruled list; emoji icons replaced by text labels; one filled button per screen.
 
 ### Added
+- `api`: The bot still reads a forwarded deadline when the AI is down, over the daily limit or not set up: a plain parser understands "до 25.11 18:00", "1 грудня о 9:00", "завтра 8:00", "до п'ятниці", "через 3 дні", says it read the message without AI and offers the deadline with the same buttons.
 - `ui`: Privacy page (`#/privacy`, readable without an account, linked from the login screen and Settings → Акаунт): what Dueboard stores, which services get what (the AI provider in use, Telegram, Moodle, Google Fonts, AWS), the one cookie, how long data stays (backups included) and how to export, disconnect or delete everything.
 - `api`: `/support <питання>` in the Telegram bot forwards the question to the team chat (`TEAM_CHAT_ID`); the team answers with `/reply <chat id> текст`. `/chatid` in a group shows the id to set. 5 questions an hour per chat.
 - `api`: Dueboard Prep, the paid package: 149 грн for 30 days unlocks the whole exam prep section (the board, Telegram and Moodle sync stay free). Payment is a built-in demo checkout with test cards only, no real money and no external service; paying again adds 30 days on top of the time left. Settings shows the package and the payment history. `PAYWALL=0` opens exam prep to everyone.
@@ -89,6 +90,8 @@ and tagged with the commit scope: `api`, `ui`, `db`, `auth`, `core`, `infra`.
 - `ui`: Generate any number of AI questions (1–30) without adding topics first; the model names the topics and new ones are created.
 
 ### Fixed
+- `api`: Gemini falls back to `gemini-3.1-flash-lite`, then `gemini-3.5-flash-lite` (instead of `gemini-3.8-flash`, which was nearly always overloaded); in the bot and for explanations the main model gets 15 s and each fallback 20 s, so all three fit in the minute a student waits. The log tells a quota error (429) from Google being short of capacity (503).
+- `api`: A forwarded message the AI failed to read no longer counts toward the student's 50 a day.
 - `ui`: A second click on "Pay" during the bank pause no longer sends a second payment; reopening the checkout continues the same unpaid order instead of starting a new one each time.
 - `ui`: Background requests (AI explanations, the bot link, payment history) no longer keep a just-submitted form locked; a test summary asks for at most 2 AI explanations at a time instead of all at once (the server allows 3 per student).
 - `api`: The data export includes question explanations, Dueboard Prep's end date and the payment history, as the privacy page promises.

@@ -7,8 +7,11 @@ export const MODEL = 'claude-opus-5-5';
 export const PROVIDERS = {
   claude: { model: MODEL, label: 'Claude' },
   // A busy Gemini model answers 503 "high demand" or does not answer at all; then the next one is tried.
-  // gemini-3.8-flash was often overloaded in Nov 2026, so the default is the one that answered reliably.
-  gemini: { model: 'gemini-3-flash-preview', label: 'Gemini', fallbacks: ['gemini-3.8-flash'], attemptTimeout: 150_000 },
+  // In Nov 2026 every full Flash model was often overloaded at once (gemini-3.8-flash nearly always), while the
+  // lite models kept answering in about a second: they are the fallbacks.
+  gemini: {
+    model: 'gemini-3-flash-preview', label: 'Gemini', fallbacks: ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'], attemptTimeout: 150_000,
+  },
   deepseek: { model: 'deepseek-flash', label: 'DeepSeek' },
 };
 // How many questions one run writes: the student picks the number.
@@ -147,7 +150,9 @@ const JSON_EXAMPLE = '{"questions":[{"topic":"Big O notation","prompt":"…","op
 // A student waits in the chat for this one: a short timeout per model, not the minutes a slide deck may take.
 const EXTRACT_SPEC = {
   timeout: 60_000,
-  attemptTimeout: 30_000,
+  // Gemini: 15 s for the main model, then 20 s for each fallback, so all three fit in about a minute.
+  firstAttemptTimeout: 15_000,
+  attemptTimeout: 20_000,
   system: `You read a message a university student got, usually forwarded from a course chat, and list the deadlines in it: work to hand in, tests, exams, registrations.
 For each one give:
 - title: short, what has to be done, in the language of the message;
@@ -179,7 +184,8 @@ When there is no deadline in the message, return an empty list.`,
 const QUESTIONS_SPEC = { system: SYSTEM, schema: SCHEMA, example: JSON_EXAMPLE };
 const EXPLAIN_SPEC = {
   timeout: 60_000,
-  attemptTimeout: 30_000,
+  firstAttemptTimeout: 15_000,
+  attemptTimeout: 20_000,
   system: `You explain one practice exam question to a university student who just answered it wrong.
 In 2-4 sentences: why the correct answer is right, worked out on the question's own numbers or case, and the slip that leads to the tempting wrong options.
 Write in the language of the question. No greeting, no restating the question.`,
@@ -209,7 +215,11 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
       throw new HttpError(504, `${label} відповідає надто довго. Спробуйте ще раз або попросіть менше питань.`);
     }
     const data = await res.json().catch(() => null);
-    if (busyOk && [429, 503].includes(res.status)) return null;
+    // The log says which: 429 is our quota, 503 is Google short of capacity, 500 a passing server error.
+    if (busyOk && [429, 500, 503].includes(res.status)) {
+      console.error(`${label} ${body.model} answered ${res.status}: ${data?.error?.message?.slice(0, 120) || 'no details'}`);
+      return null;
+    }
     if (!res.ok) {
       console.error(`${label} API ${res.status}:`, data?.error?.message || JSON.stringify(data?.error || data)?.slice(0, 300) || 'no details');
       if ([429, 503, 529].includes(res.status)) throw new HttpError(503, `${label} зараз перевантажений. Спробуйте за хвилину.`);
@@ -259,7 +269,10 @@ export function createAi({ provider = 'claude', apiKey, model, fetchImpl = globa
           response_format: { type: 'text', mime_type: 'application/json', schema: spec.schema },
           generation_config: { max_output_tokens: 16000 },
           store: false,
-        }, { busyOk: i < models.length - 1, timeout: spec.attemptTimeout ?? PROVIDERS.gemini.attemptTimeout });
+        }, {
+          busyOk: i < models.length - 1,
+          timeout: (i === 0 && spec.firstAttemptTimeout) || spec.attemptTimeout || PROVIDERS.gemini.attemptTimeout,
+        });
         if (data) break;
         console.error(`Gemini ${m} is busy, trying ${models[i + 1]}`);
       }

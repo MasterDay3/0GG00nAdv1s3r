@@ -43,6 +43,7 @@ context, adds its own functions to it and registers its routes. Modules call eac
 | `bot/handlers.js` | Commands, buttons, deadlines from forwarded messages, `/support`, group notifications |
 | `bot/texts.js` | Every message text, in Kyiv time |
 | `bot/reminders.js` | Which reminders (3 days, 1 day, 3 hours) are due |
+| `bot/simple-parse.js` | Reads a deadline from a message without AI, when the AI is down or over its limit |
 | **`clients/`** | **External services** |
 | `clients/ai.js` | Claude, Gemini or DeepSeek over plain `fetch`: questions, explanations, deadlines in messages |
 | `clients/telegram.js` | Thin Telegram Bot API client (only logs when there is no token) |
